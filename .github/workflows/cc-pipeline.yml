@@ -151,7 +151,8 @@ jobs:
         run: python tools/test-agent.py
       - name: Vorgänger-Build (für den Versionssprung-Test) bauen und beiseitelegen
         run: |
-          python tools/stamp-build.py ([int]"${{ github.run_number }}" - 1)
+          $ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
+          python tools/stamp-build.py (100 + [int]"${{ github.run_number }}")
           python tools/make-dist.py
           npx --yes @tauri-apps/cli@2 icon icons/icon-512.png
           pip install pyinstaller
@@ -164,6 +165,7 @@ jobs:
           Move-Item src-tauri/target/release/bundle/nsis/*-setup.exe $d
       - name: Endgültigen Installer bauen (ohne Testnummer, so wie er ausgeliefert wird)
         run: |
+          $ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
           git checkout -- js/version.js src-tauri/tauri.conf.json src-tauri/Cargo.toml tools/desktop-agent.py
           python tools/make-dist.py
           pyinstaller --onefile --name carvis-agent --distpath agent-dist tools/desktop-agent.py
@@ -180,12 +182,14 @@ jobs:
           New-Item -ItemType Directory -Force $d | Out-Null
           gh release download v3.6.7 --repo $env:QUELLE --pattern "CARVIS-CORE_3.6.7_x64-setup.exe" --pattern "SHA256SUMS.txt" --dir $d
           if ($LASTEXITCODE -ne 0) { throw "Download des 3.6.7-Releases fehlgeschlagen" }
+          "CARVIS_OLD_DIR=$d" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Umstieg 3.6.7 -> neu und Rückweg (Nutzerdaten bleiben)
         run: python tools/test-migration.py (Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe).FullName
       - name: Update-Kette (echte Installation, GitHub-Attrappe)
         run: python tools/test-update-chain.py (Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe).FullName (Get-ChildItem "$env:RUNNER_TEMP/build-A/*-setup.exe").FullName
       - name: Portable CARVIS-CORE.exe bauen und testen
         run: |
+          $ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
           $env:CARVIS_AGENT_EXE = (Resolve-Path agent-dist/carvis-agent.exe).Path
           npx --yes @tauri-apps/cli@2 build --no-bundle --features portable
           New-Item -ItemType Directory -Force portable | Out-Null
