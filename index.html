@@ -30,6 +30,7 @@
   <link rel="modulepreload" href="js/views/models.js">
 </head>
 <body>
+  <div class="ambient" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i></div>
   <div id="app" data-mode="carvis">
     <header class="topbar">
       <a class="brand" href="#/carvis" aria-label="CARVIS CORE – Start">
@@ -37,6 +38,7 @@
         <span class="brand-text"><b>CARVIS CORE</b></span>
       </a>
       <nav class="tabs" id="tabs" role="tablist" aria-label="Hauptbereiche">
+        <span class="tab-ind" aria-hidden="true"></span>
         <a role="tab" data-area="dashboard" href="#/gpt/dashboard">Dashboard</a>
         <a role="tab" data-area="carvis" href="#/carvis">CARVIS</a>
         <a role="tab" data-area="gpt" href="#/gpt/chat">GPT</a>
@@ -60,7 +62,7 @@
           </div>
           <div class="carvis-bottom">
             <p class="greeting" id="carvis-greeting">Hallo. Ich bin CARVIS. Was kann ich für dich erledigen?</p>
-            <button class="voice-gate" id="voice-gate" data-act="voice-gate" hidden>🔊 Tippen, damit C dich begrüßt <small>Der Browser erlaubt Sprachausgabe erst nach einer Interaktion</small></button>
+            <button class="voice-gate" id="voice-gate" data-act="voice-gate" hidden>🔊 Tippen, damit CARVIS dich begrüßt <small>Der Browser erlaubt Sprachausgabe erst nach einer Interaktion</small></button>
             <div class="carvis-feed" id="carvis-feed" aria-live="polite"></div>
             <div class="interim" id="interim" aria-live="polite"></div>
             <form class="composer" id="carvis-form" autocomplete="off">

@@ -140,6 +140,7 @@ function updateNav() {
     a.setAttribute('aria-selected', on);
     on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current');
   });
+  moveTabIndicator();
   const sub = $('#subnav');
   const area = AREAS[cur];
   if (area) {
@@ -151,6 +152,18 @@ function updateNav() {
     if (sub.dataset.k !== html) { sub.dataset.k = html; sub.innerHTML = html; }
   } else { sub.hidden = true; sub.innerHTML = ''; sub.dataset.k = ''; }
 }
+
+// Gleitende Markierung unter dem aktiven Hauptreiter (nur transform/width, GPU-schonend)
+function moveTabIndicator() {
+  const tabs = $('#tabs');
+  const on = tabs?.querySelector('a.on');
+  if (!tabs || !on || !on.offsetWidth) return;
+  tabs.style.setProperty('--ix', `${on.offsetLeft}px`);
+  tabs.style.setProperty('--iw', `${on.offsetWidth}px`);
+  tabs.classList.add('has-ind');
+}
+window.addEventListener('resize', () => requestAnimationFrame(moveTabIndicator));
+document.fonts?.ready.then(moveTabIndicator);
 
 function subMore(el) {
   const area = AREAS[tabOf()];
@@ -287,7 +300,7 @@ function speak(text, { converse = false, onBlocked } = {}) {
       if (converse && store.get().settings.conversationMode && mode === 'carvis' && !voice.listening) setTimeout(() => !busy && toggleMic(), 350);
     },
   });
-  if (coreState !== 'speaking') setCore('speaking');
+  // „Spricht“ erst anzeigen, wenn die Ausgabe wirklich startet (onStart) – keine vorgetäuschte Aktivität
 }
 
 // =============================================================

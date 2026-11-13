@@ -20,6 +20,7 @@ const SLIDERS = [
   ['panelMin', 'GPT-Fenster Mindestbreite', 200, 520, 20, (v) => `${v} px`],
 ];
 const MODES = [['dark', 'Dunkel'], ['light', 'Hell'], ['system', 'System'], ['custom', 'Eigen']];
+const LOOKS = [['glass', 'Glas'], ['standard', 'Standard'], ['compact', 'Kompakt']];
 const DENSITY = [[0.8, 'Kompakt'], [1, 'Normal'], [1.2, 'Großzügig']];
 const CORE = [['full', 'Voll'], ['calm', 'Ruhig'], ['minimal', 'Minimal'], ['off', 'Aus']];
 
@@ -58,6 +59,7 @@ export default {
         <section class="card"><header class="card-head"><h2>${icon('preview')} Modus</h2></header>
           <div class="seg" role="group" aria-label="Farbmodus">${MODES.map(([k, l]) => `<button class="${t.mode === k ? 'on' : ''}" data-act="theme-mode" data-id="${k}" aria-pressed="${t.mode === k}">${l}</button>`).join('')}</div>
           <p class="muted small">${t.mode === 'system' ? 'Folgt automatisch dem Hell-/Dunkel-Design von Windows.' : t.mode === 'custom' ? 'Eigene Hintergrund- und Flächenfarbe; Textfarbe passt sich der Helligkeit an.' : 'Fester Modus.'}</p>
+          <div class="field" style="margin-top:14px">Erscheinungsbild<div class="seg" role="group" aria-label="Erscheinungsbild">${LOOKS.map(([k, l]) => `<button class="${t.look === k ? 'on' : ''}" data-act="theme-look" data-id="${k}" aria-pressed="${t.look === k}">${l}</button>`).join('')}</div></div>
           ${t.mode === 'custom' ? `<div class="two"><label class="field">Hintergrund<input type="color" data-theme-key="bg" value="${esc(t.bg || '#0b0b0c')}"></label><label class="field">Flächen<input type="color" data-theme-key="surface" value="${esc(t.surface || '#151516')}"></label></div>` : ''}
         </section>
 
@@ -112,6 +114,7 @@ export default {
     const t = theme();
     const id = el.dataset.id;
     if (act === 'theme-preset') { const p = PRESETS.find((x) => x.id === id); save({ preset: p.id, accent: p.color, profile: 'custom' }, ctx); }
+    if (act === 'theme-look') return save({ look: id }, ctx);
     if (act === 'theme-mode') save({ mode: id, profile: 'custom', ...(id === 'custom' && !t.bg ? { bg: '#0b0b0c' } : {}) }, ctx);
     if (act === 'theme-profile') { const p = PROFILES.find((x) => x.id === id); save({ ...p.t, profile: p.id }, ctx); toast(`Design „${p.label}“ aktiv`, 'ok', 1400); }
     if (act === 'theme-own') { const p = (store.get().settings.designProfiles || []).find((x) => x.id === id); if (p) { actions.setSettings({ theme: normalizeTheme({ ...p.t, profile: p.id }) }); ctx.applySettings(); } }

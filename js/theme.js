@@ -22,6 +22,7 @@ export const defaultTheme = () => ({
   textScale: 1, weight: 400, radius: 1, shadow: 1, density: 1,
   transparency: 0, glass: 0, speed: 1, glow: 0.4,
   panelMin: 260, coreView: 'full', hidden: [], order: [],
+  look: 'glass',                       // Erscheinungsbild: glass (Premium-Glas) · standard (matt) · compact
 });
 
 /** Fertige Designprofile: setzen mehrere Werte auf einmal (One-Click-Designwechsel). */
@@ -115,6 +116,7 @@ export function normalizeTheme(theme) {
   num('textScale', 0.85, 1.3); num('weight', 300, 600); num('radius', 0, 2); num('shadow', 0, 2); num('density', 0.75, 1.3);
   num('transparency', 0, 0.45); num('glass', 0, 24); num('speed', 0.25, 3); num('glow', 0, 1.8); num('panelMin', 200, 520);
   if (!['full', 'calm', 'minimal', 'off'].includes(t.coreView)) t.coreView = 'full';
+  if (!['glass', 'standard', 'compact'].includes(t.look)) t.look = 'glass';
   if (!Array.isArray(t.hidden)) t.hidden = [];
   if (!Array.isArray(t.order)) t.order = [];
   return t;
@@ -146,7 +148,8 @@ export function applyTheme(theme) {
   set('--fw', String(t.weight));
   set('--rs', String(t.radius));
   set('--sk', String(t.shadow));
-  set('--d', String(t.density));
+  set('--d', String(t.look === 'compact' ? Math.min(t.density, 0.82) : t.density));
+  root.dataset.look = t.look;
   set('--alpha', String(t.transparency));
   set('--blur', `${t.glass}px`);
   set('--panel-min', `${t.panelMin}px`);
