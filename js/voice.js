@@ -6,6 +6,10 @@
 //   der Spracherkennung kollidieren kann).
 import { isIOS } from './util.js';
 
+// Windows-App (Tauri/WebView2): Die Browser-Spracherkennung ist dort nicht verfügbar bzw. scheitert.
+const IN_APP = !!(window.__TAURI__ && window.__TAURI__.core);
+const APP_STT = 'Spracheingabe ist in der Windows-App noch nicht verfügbar (WebView2 bietet keine Spracherkennung). Öffne CARVIS CORE im Browser (Edge oder Chrome) oder tippe deine Frage. Sprachausgabe funktioniert.';
+
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 const ERRORS = {
@@ -39,9 +43,19 @@ export const voice = {
     } catch { /* ignorieren */ }
   },
 
-  listen({ lang = 'de-DE', onStart, onInterim, onFinal, onEnd, onError, onLevel } = {}) {
-    if (!SR) { onError?.('Spracherkennung wird von diesem Browser nicht unterstützt (z. B. Firefox). Nutze Chrome, Edge oder Safari.'); return; }
+  /** Mikrofonberechtigung: 'granted' | 'denied' | 'prompt' | 'unknown' (ohne Abfrage-Dialog). */
+  async micPermission() {
+    try { return (await navigator.permissions.query({ name: 'microphone' })).state; } catch { return 'unknown'; }
+  },
+
+  async listen({ lang = 'de-DE', onStart, onInterim, onFinal, onEnd, onError, onLevel } = {}) {
+    if (!SR) { onError?.(IN_APP ? APP_STT : 'Spracherkennung wird von diesem Browser nicht unterstützt (z. B. Firefox). Nutze Chrome, Edge oder Safari.', 'unsupported'); onEnd?.('', true); return; }
     if (this.listening) return;
+    if ((await this.micPermission()) === 'denied') {
+      onError?.('Das Mikrofon ist für diese Seite gesperrt. Klicke links in der Adressleiste auf das Schloss-Symbol → Mikrofon → Zulassen, dann erneut versuchen.', 'not-allowed');
+      onEnd?.('', true);
+      return;
+    }
     this.pauseWake();
     this.cancelSpeak();
     const rec = new SR();
@@ -68,7 +82,8 @@ export const voice = {
     };
     rec.onerror = (e) => {
       errored = true;
-      const msg = ERRORS[e.error] === undefined ? `Spracherkennung: ${e.error}` : ERRORS[e.error];
+      const appFail = IN_APP && ['network', 'service-not-allowed', 'not-allowed', 'language-not-supported'].includes(e.error);
+      const msg = appFail ? APP_STT : ERRORS[e.error] === undefined ? `Spracherkennung: ${e.error}` : ERRORS[e.error];
       if (msg) onError?.(msg, e.error);
     };
     rec.onend = () => {
@@ -158,7 +173,7 @@ export const voice = {
    * verweigert (Autoplay-Regel) – dann muss der Nutzer einmal tippen/klicken.
    * Der Text wird satzweise mit kurzen Pausen gesprochen. Die Klangqualität bestimmt die gewählte Systemstimme.
    */
-  speak(text, { voiceName, lang = 'de-DE', rate = 1, pitch = 1, onStart, onEnd, onBoundary, onBlocked } = {}) {
+  speak(text, { voiceName, lang = 'de-DE', rate = 1, pitch = 1, volume = 1, onStart, onEnd, onBoundary, onBlocked } = {}) {
     if (!this.ttsSupported || !text) { onEnd?.(); return; }
     this.cancelSpeak();
     const gen = ++this._gen;
@@ -181,6 +196,7 @@ export const voice = {
       u.lang = lang;
       u.rate = Math.max(0.5, Math.min(2, rate * part.rate));
       u.pitch = Math.max(0, Math.min(2, pitch * part.pitch));
+      u.volume = Math.max(0, Math.min(1, volume));
       if (v) u.voice = v;
       u.onstart = () => { if (!started) { started = true; onStart?.(); } };
       u.onboundary = () => onBoundary?.();

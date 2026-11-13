@@ -46,7 +46,16 @@ const AREAS = {
 const SUBTITLE = { dashboard: 'Übersicht', chat: 'Arbeitsbereich' };
 const areaOf = (id) => Object.keys(AREAS).find((a) => AREAS[a].main.includes(id) || AREAS[a].more.includes(id)) || 'gpt';
 const tabOf = () => (mode === 'carvis' ? 'carvis' : areaOf(viewId));
-const CORE_LABEL = { idle: 'IDLE · bereit', listening: 'LISTENING · hört zu', thinking: 'THINKING · verarbeitet', speaking: 'SPEAKING · spricht', executing: 'EXECUTING · führt aus', error: 'ERROR · Fehler' };
+const CORE_LABEL = { idle: 'Bereit', listening: 'Hört zu', thinking: 'Verarbeitet', speaking: 'Spricht', executing: 'Führt aus', error: 'Fehler' };
+// Ehrlicher Ruhezustand: ohne Internet „Offline“, ohne verbundene KI „Bereit · ohne KI“ (Kern gedämpft)
+function aiConnected() {
+  const st = store.get();
+  return st.experts.some((e) => e.enabled && e.status === 'ok' && (e.cost !== 'paid' || st.settings.allowPaid));
+}
+function idleLabel() {
+  if (!navigator.onLine) return 'Offline';
+  return aiConnected() ? 'Bereit' : 'Bereit · ohne KI';
+}
 
 const app = $('#app');
 const viewEl = $('#view');
@@ -89,9 +98,11 @@ function setCore(state) {
   coreState = state;
   core.setState(state);
   const chip = $('#state-chip');
-  chip.textContent = CORE_LABEL[state];
+  chip.textContent = state === 'idle' ? idleLabel() : CORE_LABEL[state];
   chip.dataset.state = state;
   document.body.dataset.core = state;
+  document.body.dataset.ai = aiConnected() ? 'on' : 'none';
+  document.body.dataset.net = navigator.onLine ? 'on' : 'off';
 }
 
 function flashError(ms = 2600) {
@@ -291,6 +302,7 @@ function speak(text, { converse = false, onBlocked } = {}) {
     lang: s.lang,
     rate: s.rate,
     pitch: s.pitch,
+    volume: s.volume ?? 1,
     onStart: () => { voice.pauseWake(); setCore('speaking'); },
     onBoundary: () => core.kick(0.75),
     onEnd: () => {
@@ -397,6 +409,14 @@ function renderStatus(rerenderViews) {
     : '<span class="led led-warn"></span>Keine KI verbunden';
   pill.title = active.length ? 'Verbundene KI-Modelle – klicken für die Übersicht' : 'Keine echte KI verbunden – freie Antworten sind simuliert. Klicken, um Modelle zu verbinden.';
   pill.dataset.go = '#/gpt/models';
+  if (coreState === 'idle') setCore('idle'); // Ruhezustand (online/KI) aktuell halten
+  const cb = $('#talk-btn');
+  if (cb) {
+    cb.hidden = !voice.sttSupported;
+    cb.classList.toggle('on', !!s.conversationMode);
+    cb.innerHTML = `<span class="led led-${s.conversationMode ? 'ok' : 'idle'}"></span>Gespräch ${s.conversationMode ? 'an' : 'aus'}`;
+    cb.title = 'Gesprächsmodus: CARVIS hört nach jeder gesprochenen Antwort wieder zu. Beenden mit „Stopp“.';
+  }
   const wb = $('#wake-btn');
   wb.hidden = !voice.wakeSupported;
   wb.classList.toggle('on', !!status.wake);
@@ -444,6 +464,14 @@ const GLOBAL = {
     actions.setSettings({ voiceOutput: on });
     if (!on) { voice.cancelSpeak(); if (coreState === 'speaking') setCore('idle'); }
     toast(on ? 'Sprachausgabe an' : 'Sprachausgabe aus', 'info', 1400);
+  },
+  // Ein Klick: Gesprächsmodus an und sofort zuhören
+  'toggle-talk': () => {
+    const on = !store.get().settings.conversationMode;
+    actions.setSettings({ conversationMode: on });
+    renderStatus();
+    if (on) { toast('Gesprächsmodus an – sprich einfach. Beenden mit „Stopp“.', 'ok'); if (!voice.listening && !busy) toggleMic(); }
+    else { if (voice.listening) voice.stop(); toast('Gesprächsmodus aus.'); }
   },
   'toggle-wake': () => {
     actions.setSettings({ wakeWord: !store.get().settings.wakeWord });
@@ -566,8 +594,8 @@ function tickClock() {
 setInterval(tickClock, 1000);
 document.addEventListener('visibilitychange', tickClock);
 
-window.addEventListener('online', () => { status.online = true; renderStatus(true); });
-window.addEventListener('offline', () => { status.online = false; renderStatus(true); toast('Offline – CC läuft lokal weiter.', 'info'); });
+window.addEventListener('online', () => { status.online = true; renderStatus(true); if (coreState === 'idle') setCore('idle'); });
+window.addEventListener('offline', () => { status.online = false; renderStatus(true); if (coreState === 'idle') setCore('idle'); toast('Offline – CC läuft lokal weiter.', 'info'); });
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
@@ -636,10 +664,13 @@ function greet(fromClick) {
   const s = st.settings;
   if (!fromClick) {
     const back = st.lastVisit && Date.now() - st.lastVisit > 60 * 1000;
+    // Laut nur einmal pro Sitzung begrüßen – nicht bei jedem Neuladen/Seitenwechsel
+    let greeted = false;
+    try { greeted = sessionStorage.getItem('cc.greeted') === '1'; sessionStorage.setItem('cc.greeted', '1'); } catch { /* privat */ }
     greetingText = nextGreeting({ name: s.userName, formal: s.addressForm !== 'du', back: !!back, lang: s.lang || 'de' });
     $('#carvis-greeting').textContent = greetingText;
     store.update((x) => (x.lastVisit = Date.now()));
-    if (!s.greetOnOpen || !s.voiceOutput || !voice.ttsSupported || mode !== 'carvis') return;
+    if (greeted || !s.greetOnOpen || !s.voiceOutput || !voice.ttsSupported || mode !== 'carvis') return;
   }
   greetingPending = false;
   speak(greetingText, { onBlocked: showVoiceGate });

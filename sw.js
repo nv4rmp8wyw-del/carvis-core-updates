@@ -1,5 +1,5 @@
 // Service Worker: App-Shell offline verfügbar machen. Version erhöhen, wenn Dateien sich ändern.
-const CACHE = 'ccc-3.8.1-r11-75b3773';
+const CACHE = 'ccc-3.8.1-r12-9f17730';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/cc.css',
   'js/app.js', 'js/util.js', 'js/store.js', 'js/core.js', 'js/voice.js', 'js/engine.js', 'js/ui.js', 'js/blocks.js',

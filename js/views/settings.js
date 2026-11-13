@@ -44,6 +44,7 @@ export default {
         <div class="two">
           <label class="field">Tempo <output>${st.rate.toFixed(1)}</output><input type="range" min="0.6" max="1.6" step="0.1" data-set="rate" value="${st.rate}"></label>
           <label class="field">Tonhöhe <output>${st.pitch.toFixed(1)}</output><input type="range" min="0.5" max="1.5" step="0.1" data-set="pitch" value="${st.pitch}"></label>
+          <label class="field">Lautstärke <output>${Math.round((st.volume ?? 1) * 100)} %</output><input type="range" min="0" max="1" step="0.05" data-set="volume" value="${st.volume ?? 1}"></label>
         </div>
         <button class="btn btn-ghost" data-act="tts-test">${icon('speak')} Stimme testen</button>
       </section>

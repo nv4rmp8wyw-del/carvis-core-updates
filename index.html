@@ -56,7 +56,7 @@
           <div class="core-stage">
             <canvas id="core" aria-hidden="true"></canvas>
             <div class="core-hud">
-              <span class="state-chip" id="state-chip">IDLE</span>
+              <span class="state-chip" id="state-chip">Bereit</span>
               <button class="stop-speak" data-act="stop-speak" aria-label="Sprachausgabe stoppen">■ Stopp</button>
             </div>
           </div>
@@ -80,6 +80,7 @@
             </form>
             <div class="carvis-meta">
               <div class="chips" id="carvis-chips"></div>
+              <button class="wake-btn" id="talk-btn" data-act="toggle-talk" hidden></button>
               <button class="wake-btn" id="wake-btn" data-act="toggle-wake" hidden></button>
             </div>
           </div>
