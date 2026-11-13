@@ -1,5 +1,5 @@
 // Service Worker: App-Shell offline verfügbar machen. Version erhöhen, wenn Dateien sich ändern.
-const CACHE = 'ccc-3.8.1-r9';
+const CACHE = 'ccc-3.8.1-r10-d177609';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/cc.css',
   'js/app.js', 'js/util.js', 'js/store.js', 'js/core.js', 'js/voice.js', 'js/engine.js', 'js/ui.js', 'js/blocks.js',
@@ -10,7 +10,7 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {

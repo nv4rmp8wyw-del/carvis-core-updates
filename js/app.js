@@ -558,6 +558,11 @@ window.addEventListener('offline', () => { status.online = false; renderStatus(t
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Neue Version automatisch anzeigen: übernimmt ein neuer Service Worker, einmal neu laden (nicht beim allerersten Besuch).
+  if (navigator.serviceWorker.controller) {
+    let neuGeladen = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (!neuGeladen) { neuGeladen = true; location.reload(); } });
+  }
   navigator.serviceWorker.ready.then(() => { status.sw = true; renderStatus(true); });
 }
 
