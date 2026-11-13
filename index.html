@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CARVIS CORE</title>
+  <meta name="description" content="CARVIS CORE (CC) – persönlicher KI-Assistent">
+  <meta name="theme-color" content="#0e1013">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CC">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/carvis38.css">
+  <link rel="stylesheet" href="css/carvis4.css">
+  <link rel="modulepreload" href="js/util.js">
+  <link rel="modulepreload" href="js/store.js">
+  <link rel="modulepreload" href="js/core.js">
+  <link rel="modulepreload" href="js/voice.js">
+  <link rel="modulepreload" href="js/engine.js">
+  <link rel="modulepreload" href="js/ui.js">
+  <link rel="modulepreload" href="js/blocks.js">
+  <link rel="modulepreload" href="js/sysmon.js">
+  <link rel="modulepreload" href="js/views/dashboard.js">
+  <link rel="modulepreload" href="js/views/workspace.js">
+  <link rel="modulepreload" href="js/views/settings.js">
+  <link rel="modulepreload" href="js/views/models.js">
+</head>
+<body>
+  <div id="app" data-mode="carvis">
+    <header class="topbar">
+      <a class="brand" href="#/carvis" aria-label="CARVIS CORE – Start">
+        <img class="brand-mark" src="icons/mark.svg" alt="" width="30" height="30">
+        <span class="brand-text"><b>CARVIS CORE</b></span>
+      </a>
+      <nav class="tabs" id="tabs" role="tablist" aria-label="Hauptbereiche">
+        <a role="tab" data-area="dashboard" href="#/gpt/dashboard">Dashboard</a>
+        <a role="tab" data-area="carvis" href="#/carvis">CARVIS</a>
+        <a role="tab" data-area="gpt" href="#/gpt/chat">GPT</a>
+      </nav>
+      <div class="topbar-right">
+        <button class="pill" id="engine-pill" data-go="#/gpt/settings" title="KI-Engine – Einstellungen öffnen"></button>
+        <span class="clock" data-clock aria-label="Uhrzeit"></span>
+      </div>
+    </header>
+
+    <main class="modes" id="modes">
+      <div class="modes-track" id="modes-track">
+        <!-- CARVIS-MODUS -->
+        <section class="mode mode-carvis" id="mode-carvis" aria-label="CARVIS-Modus">
+          <div class="core-stage">
+            <canvas id="core" aria-hidden="true"></canvas>
+            <div class="core-hud">
+              <span class="state-chip" id="state-chip">IDLE</span>
+              <button class="stop-speak" data-act="stop-speak" aria-label="Sprachausgabe stoppen">■ Stopp</button>
+            </div>
+          </div>
+          <div class="carvis-bottom">
+            <p class="greeting" id="carvis-greeting">Hallo. Ich bin C. Was kann ich für dich erledigen?</p>
+            <button class="voice-gate" id="voice-gate" data-act="voice-gate" hidden>🔊 Tippen, damit C dich begrüßt <small>Der Browser erlaubt Sprachausgabe erst nach einer Interaktion</small></button>
+            <div class="carvis-feed" id="carvis-feed" aria-live="polite"></div>
+            <div class="interim" id="interim" aria-live="polite"></div>
+            <form class="composer" id="carvis-form" autocomplete="off">
+              <button type="button" class="icon-btn mic" data-act="mic" title="Spracheingabe starten/stoppen" aria-label="Spracheingabe">
+                <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
+              </button>
+              <input type="text" name="q" placeholder="Frag C etwas …" aria-label="Nachricht an C" enterkeyhint="send">
+              <button type="button" class="icon-btn" data-act="toggle-tts" title="Sprachausgabe an/aus" aria-label="Sprachausgabe an/aus">
+                <svg class="ico-on" viewBox="0 0 24 24"><path d="M3 10v4h4l5 4V6L7 10H3Zm13.5 2A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z"/></svg>
+                <svg class="ico-off" viewBox="0 0 24 24"><path d="M3 10v4h4l5 4V6L7 10H3Zm13.6 2 2.7-2.7-1.4-1.4-2.7 2.7-2.7-2.7-1.4 1.4 2.7 2.7-2.7 2.7 1.4 1.4 2.7-2.7 2.7 2.7 1.4-1.4-2.7-2.7Z"/></svg>
+              </button>
+              <button type="submit" class="icon-btn send" title="Senden" aria-label="Senden">
+                <svg viewBox="0 0 24 24"><path d="M3 20.5 21 12 3 3.5 3 10l12 2-12 2z"/></svg>
+              </button>
+            </form>
+            <div class="carvis-meta">
+              <div class="chips" id="carvis-chips"></div>
+              <button class="wake-btn" id="wake-btn" data-act="toggle-wake" hidden></button>
+            </div>
+          </div>
+        </section>
+
+        <!-- GPT-MODUS -->
+        <section class="mode mode-gpt" id="mode-gpt" aria-label="GPT-Modus">
+          <nav class="subnav" id="subnav" aria-label="Unterbereiche" hidden></nav>
+          <div class="view" id="view" tabindex="-1"></div>
+        </section>
+      </div>
+    </main>
+
+    <nav class="bottom-nav" id="bottom-nav" aria-label="Navigation"></nav>
+  </div>
+
+  <div id="sheet-root"></div>
+  <div id="modal-root"></div>
+  <div id="toast-root" aria-live="polite"></div>
+
+  <noscript><p style="padding:2rem;color:#fff">CARVIS CORE benötigt JavaScript.</p></noscript>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
