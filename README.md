@@ -4,6 +4,14 @@ Dieses **öffentliche Repository dient ausschließlich als Download-Kanal** für
 
 **Der Quellcode von CARVIS CORE ist privat und wird hier nicht veröffentlicht.**
 
+## So nutzt du CARVIS CORE
+
+- **Im Browser (PC, Mac, Handy):** https://nv4rmp8wyw-del.github.io/carvis-core-updates/
+  Auf dem iPhone in Safari öffnen → Teilen → „Zum Home-Bildschirm“. Dann startet CC wie eine App.
+- **Windows-App:** neueste `CARVIS-CORE_<version>_x64-setup.exe` unter [Releases](https://github.com/nv4rmp8wyw-del/carvis-core-updates/releases/latest) herunterladen.
+
+Die Web-App liegt im Zweig `gh-pages` und enthält nur die Dateien, die jeder Browser beim Öffnen der Seite ohnehin lädt.
+
 ## Updates
 
 Die Windows-Anwendung soll neue geprüfte Releases ohne GitHub-Anmeldung finden und installieren können. Solange auf dieser Seite kein Release bereitsteht, gibt es noch kein freigegebenes öffentliches Update.
