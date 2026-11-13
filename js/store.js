@@ -31,7 +31,8 @@ export const defaultSettings = () => ({
   allowResearch: true,
   shareMemoryExternal: false,
   // Erscheinungsbild (3.3.4)
-  theme: { mode: 'dark', preset: 'cyan', accent: '#22e4ff', glow: 1, speed: 1, hidden: [] },
+  theme: { mode: 'dark', preset: 'tuerkis', accent: '#8fcfc7', profile: 'graphit', glow: 0.4, speed: 1, hidden: [] },
+  designProfiles: [], // eigene Designprofile (Design-Reiter)
   // Aktionsmodus (nur lokal, nur mit Desktop-Agent im Aktionsmodus)
   ultimateDev: false,
   addressForm: 'sie',

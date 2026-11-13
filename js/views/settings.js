@@ -108,7 +108,7 @@ export default {
       try { await window.__TAURI__.autostart[act === 'autostart-on' ? 'enable' : 'disable'](); toast(act === 'autostart-on' ? 'Autostart eingeschaltet.' : 'Autostart ausgeschaltet.', 'info'); }
       catch (e) { toast('Autostart nicht möglich: ' + (e?.message || e), 'danger'); }
     }
-    if (act === 'tts-test') ctx.speak('Hallo. Ich bin C. Wie kann ich dir heute helfen? Ich spreche mit den Einstellungen, die du gerade gewählt hast.');
+    if (act === 'tts-test') ctx.speak('Hallo. Ich bin CARVIS. Wie kann ich dir heute helfen? Ich spreche mit den Einstellungen, die du gerade gewählt hast.');
     if (act === 'data-export') download(`ccc-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(store.get(), null, 2), 'application/json');
     if (act === 'data-reset' && (await confirmDialog('Wirklich ALLE lokalen Daten (Chat, Projekte, Aufgaben, Dokumente, Gedächtnis, Einstellungen) löschen? Das kann nicht rückgängig gemacht werden.', { ok: 'Alles löschen' }))) {
       store.reset();

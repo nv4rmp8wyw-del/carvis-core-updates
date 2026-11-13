@@ -7,7 +7,7 @@ import { HoloCore } from './core.js';
 import { applyTheme, applySpeed, onThemeApplied, hexToHsl } from './theme.js';
 import { voice } from './voice.js';
 import { respond } from './engine.js';
-import { icon, toast, modal, confirmDialog, renderMessage, thinkingBubble } from './ui.js';
+import { icon, toast, modal, confirmDialog, renderMessage, thinkingBubble, popover, closePopover } from './ui.js';
 import dashboard from './views/dashboard.js';
 import settings from './views/settings.js';
 import models from './views/models.js';
@@ -19,7 +19,8 @@ const finance = lazyView('finance', 'Finanzen', 'doc', () => import('./views/fin
 const ucc = lazyView('ucc', 'Aktionen', 'bolt', () => import('./views/ucc.js'));
 const update = lazyView('update', 'Updates', 'bolt', () => import('./views/update.js'));
 const perf = lazyView('perf', 'Optimierung', 'dashboard', () => import('./views/perf.js'));
-const design = lazyView('design', 'Erscheinungsbild', 'settings', () => import('./views/design.js'));
+const design = lazyView('design', 'Design', 'preview', () => import('./views/design.js'));
+const business = lazyView('business', 'Business', 'project', () => import('./views/business.js'));
 function loadView(v) {
   if (!v.lazy) return v._p || Promise.resolve();
   const loader = v.lazy;
@@ -27,18 +28,24 @@ function loadView(v) {
   v._p = loader().then((m) => { Object.assign(v, m.default); }).catch((e) => { v.lazy = loader; v._p = null; throw e; });
   return v._p;
 }
-import { chat, projects, tasks, previews, documents, memory, chips, blocksToText } from './views/workspace.js';
+import { projects, tasks, previews, documents, memory, chips, blocksToText } from './views/workspace.js';
+import { gpt } from './views/gpt.js';
 
-const VIEWS = [dashboard, chat, models, agents, computer, finance, ucc, projects, tasks, previews, documents, memory, design, perf, update, settings];
-// Genau drei Hauptreiter: Dashboard · CARVIS · GPT. Alle Werkzeuge liegen kompakt unter GPT (Leiste + „Mehr“-Menü).
+const VIEWS = [dashboard, gpt, models, agents, business, computer, finance, ucc, projects, tasks, previews, documents, memory, design, perf, update, settings];
+// Genau drei Hauptreiter: Dashboard · CARVIS · GPT. Jede Unteransicht gehört genau einem Bereich (keine doppelten Einträge).
 const TABS = [
   { id: 'dashboard', title: 'Dashboard', icon: 'dashboard', href: '#/gpt/dashboard' },
   { id: 'carvis', title: 'CARVIS', icon: 'core', href: '#/carvis' },
   { id: 'gpt', title: 'GPT', icon: 'chat', href: '#/gpt/chat' },
 ];
-const TOOLS = ['chat', 'models', 'agents', 'perf', 'update', 'settings'];
-const MORE = ['projects', 'tasks', 'previews', 'documents', 'memory', 'computer', 'finance', 'ucc', 'design'];
-const tabOf = () => (mode === 'carvis' ? 'carvis' : viewId === 'dashboard' ? 'dashboard' : 'gpt');
+// Kontextleiste je Bereich: wichtigste Ansichten direkt, selten genutzte im „Mehr“-Menü.
+const AREAS = {
+  dashboard: { main: ['dashboard', 'perf', 'design', 'update', 'settings'], more: ['computer', 'finance', 'ucc'] },
+  gpt: { main: ['chat', 'models', 'agents', 'business'], more: ['projects', 'tasks', 'documents', 'previews', 'memory'] },
+};
+const SUBTITLE = { dashboard: 'Übersicht', chat: 'Arbeitsbereich' };
+const areaOf = (id) => Object.keys(AREAS).find((a) => AREAS[a].main.includes(id) || AREAS[a].more.includes(id)) || 'gpt';
+const tabOf = () => (mode === 'carvis' ? 'carvis' : areaOf(viewId));
 const CORE_LABEL = { idle: 'IDLE · bereit', listening: 'LISTENING · hört zu', thinking: 'THINKING · verarbeitet', speaking: 'SPEAKING · spricht', executing: 'EXECUTING · führt aus', error: 'ERROR · Fehler' };
 
 const app = $('#app');
@@ -54,7 +61,13 @@ let stage = '';
 let greetingPending = false;
 
 const core = new HoloCore($('#core'));
-onThemeApplied((pal, t, light) => core.setTheme({ hue: pal.h, sat: Math.min(100, pal.s < 12 ? pal.s : 100), glow: t.glow, speed: t.speed }));
+let coreView = 'full';
+onThemeApplied((pal, t, light) => {
+  const calm = t.coreView === 'calm';
+  core.setTheme({ hue: pal.h, sat: Math.min(100, pal.s), glow: Math.min(1, t.glow) * (calm ? 0.5 : 1), speed: t.speed * (calm ? 0.5 : 1) });
+  coreView = t.coreView;
+  core.setActive(mode === 'carvis' && (coreView === 'full' || coreView === 'calm')); // Canvas ruht, wenn er nicht sichtbar ist
+});
 window.__cccTheme = () => store.get().settings.theme;
 applyTheme(store.get().settings.theme);
 
@@ -62,6 +75,8 @@ const ctx = {
   status,
   rerender: () => renderView(),
   renderStatus: () => renderStatus(true),
+  send: (text, opts) => send(text, opts),
+  paintFeeds: () => renderFeeds(),
   applySettings,
   quickTask,
   speak,
@@ -100,12 +115,13 @@ function route() {
     viewEl.scrollTop = 0;
   }
   closeSheet();
+  closePopover();
 }
 
 function setMode(m) {
   mode = m;
   app.dataset.mode = m;
-  core.setActive(m === 'carvis');
+  core.setActive(m === 'carvis' && (coreView === 'full' || coreView === 'calm'));
   $('#mode-carvis').inert = m !== 'carvis';
   $('#mode-gpt').inert = m !== 'gpt';
   if (m === 'carvis') renderFeeds();
@@ -125,12 +141,21 @@ function updateNav() {
     on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current');
   });
   const sub = $('#subnav');
-  if (cur === 'gpt') {
+  const area = AREAS[cur];
+  if (area) {
     sub.hidden = false;
-    const link = (id) => { const v = VIEWS.find((x) => x.id === id); return `<a href="#/gpt/${id}" data-view="${id}" class="${id === viewId ? 'on' : ''}">${v.title}</a>`; };
-    const html = TOOLS.map(link).join('') + `<details class="more ${MORE.includes(viewId) ? 'on' : ''}"><summary>Mehr</summary><div class="more-menu">${MORE.map(link).join('')}</div></details>`;
+    const title = (id) => SUBTITLE[id] || VIEWS.find((x) => x.id === id).title;
+    const link = (id) => `<a href="#/gpt/${id}" data-view="${id}" class="${id === viewId ? 'on' : ''}" ${id === viewId ? 'aria-current="page"' : ''}>${title(id)}</a>`;
+    const inMore = area.more.includes(viewId);
+    const html = area.main.map(link).join('') + `<button type="button" class="sub-more ${inMore ? 'on' : ''}" data-act="sub-more" aria-haspopup="menu" aria-expanded="false">${inMore ? title(viewId) : 'Mehr'}${icon('chevron')}</button>`;
     if (sub.dataset.k !== html) { sub.dataset.k = html; sub.innerHTML = html; }
   } else { sub.hidden = true; sub.innerHTML = ''; sub.dataset.k = ''; }
+}
+
+function subMore(el) {
+  const area = AREAS[tabOf()];
+  if (!area) return;
+  popover(el, area.more.map((id) => { const v = VIEWS.find((x) => x.id === id); return { label: v.title, icon: v.icon, on: id === viewId, run: () => (location.hash = `#/gpt/${id}`) }; }), { label: 'Weitere Bereiche' });
 }
 
 let lastHtml = '';
@@ -199,15 +224,15 @@ function renderFeeds() {
   if (gf) {
     gf.innerHTML = msgs.length || busy
       ? msgs.map((m) => renderMessage(m)).join('') + (busy ? thinkingBubble(stage) : '')
-      : `<div class="feed-empty"><div class="mini-core static"><i></i><i></i><i></i><b></b></div><p>Hallo. Ich bin C. Was kann ich für dich erledigen?</p></div>`;
+      : `<div class="gw-empty"><div class="mini-core" aria-hidden="true"></div><b>CARVIS · Auto</b><span>CARVIS wählt für jede Frage das passende verbundene Modell. Gemeinsamer Verlauf mit dem CARVIS-Bereich.</span></div>`;
     gf.scrollTop = gf.scrollHeight;
   }
 }
 
-async function send(text, { viaVoice = false } = {}) {
+async function send(text, { viaVoice = false, collab } = {}) {
   text = (text || '').trim();
   if (!text) return;
-  if (busy) return toast('C verarbeitet noch die letzte Anfrage …');
+  if (busy) return toast('CARVIS verarbeitet noch die letzte Anfrage …');
   voice.cancelSpeak();
   actions.addMessage({ role: 'user', text });
   busy = true;
@@ -219,6 +244,7 @@ async function send(text, { viaVoice = false } = {}) {
   try {
     res = await respond(text, {
       mode,
+      collab,
       confirm: (msg, o) => confirmDialog(msg, o),
       onStage: (st) => {
         stage = st;
@@ -283,7 +309,7 @@ function showInterim(t) {
 
 function toggleMic() {
   if (voice.listening) return voice.stop();
-  if (busy) return toast('Moment – C verarbeitet noch.');
+  if (busy) return toast('Moment – CARVIS verarbeitet noch.');
   voice.unlock();
   const s = store.get().settings;
   voice.listen({
@@ -411,7 +437,8 @@ const GLOBAL = {
     applySettings();
     if (store.get().settings.wakeWord) toast('Wake-Word aktiv (experimentell) – sag „Hey C“.', 'ok');
   },
-  suggest: (el) => send(el.dataset.text),
+  suggest: (el) => (mode === 'gpt' && viewId === 'chat' ? gpt.sendFromComposer(el.dataset.text, ctx) : send(el.dataset.text)),
+  'sub-more': (el) => subMore(el),
   'close-sheet': () => closeSheet(),
   go: (el) => (location.hash = JSON.parse(el.dataset.payload)),
   'toggle-task': (el) => actions.toggleTask(el.dataset.id),
@@ -430,14 +457,14 @@ const GLOBAL = {
   'msg-to-doc': (el) => {
     const m = store.get().messages.find((x) => x.id === el.dataset.id);
     if (!m) return;
-    const title = m.text.replace(/[*#`„“"]/g, '').split('\n')[0].slice(0, 60) || 'Antwort von C';
+    const title = m.text.replace(/[*#`„“"]/g, '').split('\n')[0].slice(0, 60) || 'Antwort von CARVIS';
     const d = actions.addDocument({ title, content: `${m.text}\n\n${blocksToText(m.blocks)}`.trim() });
     documents.open(d.id);
     toast('Als Dokument gespeichert', 'ok');
   },
   'plan-to-project': (el) => {
     const { name, steps } = JSON.parse(el.dataset.payload);
-    const p = actions.addProject({ name: name.charAt(0).toUpperCase() + name.slice(1), description: 'Aus einem Plan von C erstellt.' });
+    const p = actions.addProject({ name: name.charAt(0).toUpperCase() + name.slice(1), description: 'Aus einem Plan von CARVIS erstellt.' });
     [...steps].reverse().forEach((t) => actions.addTask({ title: t, projectId: p.id }));
     toast(`Projekt mit ${steps.length} Aufgaben angelegt`, 'ok');
     el.disabled = true;
@@ -493,7 +520,8 @@ document.addEventListener('submit', (e) => {
     const text = inp.value;
     inp.value = '';
     if (inp.tagName === 'TEXTAREA') autoGrow(inp);
-    send(text);
+    if (f.id === 'gpt-form') gpt.sendFromComposer(text, ctx);
+    else send(text);
     return;
   }
   const v = currentView();
@@ -540,6 +568,7 @@ if (voice.ttsSupported) speechSynthesis.addEventListener?.('voiceschanged', () =
 // =============================================================
 store.subscribe(() => {
   renderFeeds();
+  if (mode === 'gpt' && viewId === 'chat') gpt.refresh();
   renderStatus(false);
   safeRerender();
 });

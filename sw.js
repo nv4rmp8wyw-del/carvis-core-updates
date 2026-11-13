@@ -1,10 +1,9 @@
 // Service Worker: App-Shell offline verfügbar machen. Version erhöhen, wenn Dateien sich ändern.
-const CACHE = 'ccc-3.8.1-r7';
+const CACHE = 'ccc-3.8.1-r9';
 const SHELL = [
-  './', 'index.html', 'manifest.webmanifest', 'css/styles.css', 'css/carvis38.css',
-  'css/carvis4.css',
+  './', 'index.html', 'manifest.webmanifest', 'css/cc.css',
   'js/app.js', 'js/util.js', 'js/store.js', 'js/core.js', 'js/voice.js', 'js/engine.js', 'js/ui.js', 'js/blocks.js',
-  'js/sysmon.js', 'js/views/dashboard.js', 'js/views/workspace.js', 'js/views/settings.js', 'js/views/ultimate.js', 'js/views/models.js', 'js/views/agents.js', 'js/views/computer.js', 'js/views/finance.js', 'js/agents.js', 'js/theme.js', 'js/greeting.js', 'js/version.js', 'js/update.js', 'js/views/update.js', 'js/views/perf.js', 'js/preview.js', 'js/views/design.js', 'js/views/ucc.js', 'js/agent-client.js',
+  'js/sysmon.js', 'js/views/dashboard.js', 'js/views/workspace.js', 'js/views/gpt.js', 'js/views/settings.js', 'js/views/ultimate.js', 'js/views/models.js', 'js/views/agents.js', 'js/views/computer.js', 'js/views/finance.js', 'js/agents.js', 'js/theme.js', 'js/greeting.js', 'js/version.js', 'js/update.js', 'js/views/update.js', 'js/views/perf.js', 'js/preview.js', 'js/views/design.js', 'js/views/business.js', 'js/views/ucc.js', 'js/agent-client.js',
   'js/ai/providers.js', 'js/ai/orchestrator.js', 'js/ai/quality.js', 'js/ai/privacy.js', 'js/ai/research.js', 'js/ai/webllm.js', 'js/ai/webllm-worker.js',
   'icons/icon.svg',
   'icons/mark.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',

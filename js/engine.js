@@ -190,14 +190,15 @@ function localCommand(raw) {
   }
 
   // Sicherheitsrelevantes & Ultimate-Funktionen – ehrlich ablehnen
-  if (/(überweis|bezahl|zahlung|kaufe?n?\b|bestell|trading|aktie|krypto|bitcoin|order)/.test(t)) {
+  // Wortgenau: „Handlungsaufforderung“ (enthält „order“) und „verkaufen“ sind keine Zahlungs-/Kaufaufträge.
+  if (/(überweis|bezahl|zahlung|(?<![a-zäöüß])(ein)?kaufe?n?\b|bestell|trading|aktie|krypto|bitcoin|\borders?\b)/.test(t)) {
     return local('Das kann und werde ich nicht ausführen: CARVIS CORE führt **keine Zahlungen, Käufe oder Trading-Orders** aus. Ich kann dir aber eine Checkliste oder Risikoanalyse dazu erstellen – schreib z. B. „Analysiere die Risiken von …“.', [
       { type: 'notice', tone: 'warn', text: 'Sicherheitsregel: Keine echten Zahlungen, keine echten Trading-Orders.' },
     ]);
   }
   const ult = ULTIMATE.find((u) => u.re.test(t));
   if (ult) {
-    return local(`**${ult.name}** ist eine geplante Funktion der geplante Funktion und in CARVIS CORE noch nicht verfügbar. Ich tue nicht so, als hätte ich das erledigt.`, [
+    return local(`**${ult.name}** ist eine geplante Funktion und in CARVIS CORE noch nicht verfügbar. Ich tue nicht so, als hätte ich das erledigt.`, [
       { type: 'notice', tone: 'info', text: 'Status: GEPLANT – nicht implementiert.' },
     ]);
   }

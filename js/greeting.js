@@ -7,15 +7,15 @@ const HELLO_EN = { night: 'Good night', morning: 'Good morning', day: 'Good afte
 
 // {h} = Tagesgruß, {n} = ", Name" (oder leer), {sie}: Sie-Form / du-Form wird über Varianten getrennt gehalten
 const SIE = {
-  first: ['{h}{n}. CARVIS ist bereit. Womit darf ich Ihnen helfen?', '{h}{n}. CARVIS CORE ist bereit. Was darf ich für Sie tun?', '{h}{n}. Ich bin C, Ihr persönlicher Assistent. Wie kann ich helfen?'],
+  first: ['{h}{n}. CARVIS ist bereit. Womit darf ich Ihnen helfen?', '{h}{n}. CARVIS CORE ist bereit. Was darf ich für Sie tun?', '{h}{n}. Ich bin CARVIS, Ihr persönlicher Assistent. Wie kann ich helfen?'],
   back: ['{h}{n}. Schön, dass Sie wieder da sind. CARVIS ist bereit. Womit darf ich Ihnen heute helfen?', '{h}{n}. Willkommen zurück. Was steht heute an?', '{h}{n}. Schön, Sie zu sehen. Ich bin bereit, wenn Sie es sind.', '{h}{n}. Willkommen zurück. Soll ich dort weitermachen, wo wir aufgehört haben?'],
 };
 const DU = {
-  first: ['{h}{n}. CARVIS ist bereit. Womit kann ich dir helfen?', '{h}{n}. Ich bin C, dein persönlicher Assistent. Was kann ich für dich tun?', '{h}{n}. CARVIS CORE ist bereit. Was steht an?'],
+  first: ['{h}{n}. CARVIS ist bereit. Womit kann ich dir helfen?', '{h}{n}. Ich bin CARVIS, dein persönlicher Assistent. Was kann ich für dich tun?', '{h}{n}. CARVIS CORE ist bereit. Was steht an?'],
   back: ['{h}{n}. Schön, dass du wieder da bist. CARVIS ist bereit. Womit darf ich dir heute helfen?', '{h}{n}. Willkommen zurück. Was steht heute an?', '{h}{n}. Schön, dich zu sehen. Ich bin bereit.', '{h}{n}. Willkommen zurück. Sollen wir dort weitermachen, wo wir aufgehört haben?'],
 };
 const EN = {
-  first: ['{h}{n}. CARVIS is ready. How may I help?', '{h}{n}. I am C, your personal assistant. What can I do for you?'],
+  first: ['{h}{n}. CARVIS is ready. How may I help?', '{h}{n}. I am CARVIS, your personal assistant. What can I do for you?'],
   back: ['{h}{n}. Good to have you back. CARVIS is ready. What can I do for you today?', '{h}{n}. Welcome back. What is on the agenda?'],
 };
 

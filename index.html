@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>CARVIS CORE</title>
   <meta name="description" content="CARVIS CORE (CC) – persönlicher KI-Assistent">
-  <meta name="theme-color" content="#0e1013">
+  <meta name="theme-color" content="#0b0b0c">
   <meta name="color-scheme" content="dark">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14,9 +14,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="css/styles.css">
-  <link rel="stylesheet" href="css/carvis38.css">
-  <link rel="stylesheet" href="css/carvis4.css">
+  <link rel="stylesheet" href="css/cc.css">
   <link rel="modulepreload" href="js/util.js">
   <link rel="modulepreload" href="js/store.js">
   <link rel="modulepreload" href="js/core.js">
@@ -27,6 +25,7 @@
   <link rel="modulepreload" href="js/sysmon.js">
   <link rel="modulepreload" href="js/views/dashboard.js">
   <link rel="modulepreload" href="js/views/workspace.js">
+  <link rel="modulepreload" href="js/views/gpt.js">
   <link rel="modulepreload" href="js/views/settings.js">
   <link rel="modulepreload" href="js/views/models.js">
 </head>
@@ -34,7 +33,7 @@
   <div id="app" data-mode="carvis">
     <header class="topbar">
       <a class="brand" href="#/carvis" aria-label="CARVIS CORE – Start">
-        <img class="brand-mark" src="icons/mark.svg" alt="" width="30" height="30">
+        <img class="brand-mark" src="icons/mark.svg" alt="" width="26" height="26">
         <span class="brand-text"><b>CARVIS CORE</b></span>
       </a>
       <nav class="tabs" id="tabs" role="tablist" aria-label="Hauptbereiche">
@@ -60,7 +59,7 @@
             </div>
           </div>
           <div class="carvis-bottom">
-            <p class="greeting" id="carvis-greeting">Hallo. Ich bin C. Was kann ich für dich erledigen?</p>
+            <p class="greeting" id="carvis-greeting">Hallo. Ich bin CARVIS. Was kann ich für dich erledigen?</p>
             <button class="voice-gate" id="voice-gate" data-act="voice-gate" hidden>🔊 Tippen, damit C dich begrüßt <small>Der Browser erlaubt Sprachausgabe erst nach einer Interaktion</small></button>
             <div class="carvis-feed" id="carvis-feed" aria-live="polite"></div>
             <div class="interim" id="interim" aria-live="polite"></div>
@@ -68,7 +67,7 @@
               <button type="button" class="icon-btn mic" data-act="mic" title="Spracheingabe starten/stoppen" aria-label="Spracheingabe">
                 <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
               </button>
-              <input type="text" name="q" placeholder="Frag C etwas …" aria-label="Nachricht an C" enterkeyhint="send">
+              <input type="text" name="q" placeholder="Frag CARVIS …" aria-label="Nachricht an CARVIS" enterkeyhint="send">
               <button type="button" class="icon-btn" data-act="toggle-tts" title="Sprachausgabe an/aus" aria-label="Sprachausgabe an/aus">
                 <svg class="ico-on" viewBox="0 0 24 24"><path d="M3 10v4h4l5 4V6L7 10H3Zm13.5 2A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z"/></svg>
                 <svg class="ico-off" viewBox="0 0 24 24"><path d="M3 10v4h4l5 4V6L7 10H3Zm13.6 2 2.7-2.7-1.4-1.4-2.7 2.7-2.7-2.7-1.4 1.4 2.7 2.7-2.7 2.7 1.4 1.4 2.7-2.7 2.7 2.7 1.4-1.4-2.7-2.7Z"/></svg>
@@ -99,7 +98,7 @@
   <div id="modal-root"></div>
   <div id="toast-root" aria-live="polite"></div>
 
-  <noscript><p style="padding:2rem;color:#fff">CARVIS CORE benötigt JavaScript.</p></noscript>
+  <noscript><p style="padding:2rem;color:#f1efea;background:#0b0b0c">CARVIS CORE benötigt JavaScript.</p></noscript>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>

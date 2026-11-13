@@ -32,6 +32,15 @@ const P = {
   bolt: 'M13 2 4 14h7l-1 8 9-12h-7l1-8Z',
   file: 'M6 2h8l6 6v14H4V2h2Zm7 1.5V9h5.5L13 3.5Z',
   plug: 'M16 7V3h-2v4h-4V3H8v4H6v6a6 6 0 0 0 5 5.9V22h2v-3.1A6 6 0 0 0 18 13V7h-2Z',
+  window: 'M3 4h18v16H3V4Zm2 4v10h14V8H5Z',
+  columns: 'M3 4h8v16H3V4Zm10 0h8v16h-8V4ZM5 6v12h4V6H5Zm10 0v12h4V6h-4Z',
+  compare: 'M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v2h2V1h-2v2Zm0 15H5l5-6v6Zm9-15h-5v2h5v13l-5-6v9h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z',
+  review: 'M15.5 14h-.8l-.3-.3A6.5 6.5 0 1 0 9.5 16a6.5 6.5 0 0 0 4.2-1.6l.3.3v.8l5 5 1.5-1.5-5-5Zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9Z',
+  team: 'M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 2c-2.3 0-7 1.2-7 3.5V19h14v-2.5C15 14.2 10.3 13 8 13Zm8 0h-.9a4.2 4.2 0 0 1 1.9 3.5V19h6v-2.5c0-2.3-4.7-3.5-7-3.5Z',
+  reset: 'M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8Z',
+  share: 'M18 16a3 3 0 0 0-2.4 1.2l-6.7-3.9a3 3 0 0 0 0-2.6l6.7-3.9A3 3 0 1 0 15 5l-6.7 3.9a3 3 0 1 0 0 6.2L15 19a3 3 0 1 0 3-3Z',
+  close: 'M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7l-1.4-1.4L9.2 12 2.9 5.7l1.4-1.4 6.3 6.3 6.3-6.3 1.4 1.4Z',
+  chevron: 'M7 10l5 5 5-5H7Z',
 };
 
 export const icon = (name, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[name] || P.dot}"/></svg>`;
@@ -48,6 +57,65 @@ export function toast(text, tone = 'info', ms = 3200) {
     el.classList.remove('in');
     setTimeout(() => el.remove(), 300);
   }, ms);
+}
+
+// ---- Popover-Menü ----
+// Hängt direkt an <body> (position: fixed) – kann von keinem Container mit overflow abgeschnitten werden.
+// items: [{ sec } | { sep: true } | { label, icon, hint, on, disabled, run }]
+let openPop = null;
+export function closePopover() {
+  if (!openPop) return;
+  const { el, anchor, cleanup } = openPop;
+  openPop = null;
+  cleanup();
+  el.remove();
+  anchor?.setAttribute('aria-expanded', 'false');
+}
+export function popover(anchor, items, { align = 'start', label = 'Menü' } = {}) {
+  if (openPop?.anchor === anchor) { closePopover(); return null; } // zweiter Klick schließt
+  closePopover();
+  const el = document.createElement('div');
+  el.className = 'pop';
+  el.setAttribute('role', 'menu');
+  el.setAttribute('aria-label', label);
+  el.innerHTML = items.map((it, i) => it.sep ? '<div class="pop-sep" role="separator"></div>'
+    : it.sec ? `<div class="pop-sec">${esc(it.sec)}</div>`
+    : `<button class="pop-item ${it.on ? 'on' : ''}" role="menuitem" data-i="${i}" ${it.disabled ? 'aria-disabled="true" tabindex="-1"' : ''} ${it.title ? `title="${esc(it.title)}"` : ''}>${it.icon ? icon(it.icon) : ''}<span>${esc(it.label)}</span>${it.hint && !it.on ? `<small>${esc(it.hint)}</small>` : ''}</button>`).join('');
+  document.body.appendChild(el);
+  const r = anchor.getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight;
+  let left = align === 'end' ? r.right - w : r.left;
+  left = Math.max(12, Math.min(left, innerWidth - w - 12));
+  let top = r.bottom + 6;
+  if (top + h > innerHeight - 12) top = Math.max(12, r.top - h - 6);
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+  anchor.setAttribute('aria-expanded', 'true');
+  const onDown = (e) => { if (!el.contains(e.target) && !anchor.contains(e.target)) closePopover(); };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { closePopover(); anchor.focus(); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const btns = [...el.querySelectorAll('.pop-item:not([aria-disabled])')];
+      const i = btns.indexOf(document.activeElement);
+      btns[(i + (e.key === 'ArrowDown' ? 1 : -1) + btns.length) % btns.length]?.focus();
+    }
+  };
+  const onScroll = (e) => { if (!el.contains(e.target)) closePopover(); };
+  document.addEventListener('pointerdown', onDown, true);
+  document.addEventListener('keydown', onKey);
+  window.addEventListener('resize', closePopover);
+  document.addEventListener('scroll', onScroll, true);
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-i]');
+    if (!b || b.getAttribute('aria-disabled')) return;
+    const it = items[+b.dataset.i];
+    closePopover();
+    it.run?.();
+  });
+  openPop = { el, anchor, cleanup: () => { document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey); window.removeEventListener('resize', closePopover); document.removeEventListener('scroll', onScroll, true); } };
+  el.querySelector('.pop-item:not([aria-disabled])')?.focus({ preventScroll: true });
+  return el;
 }
 
 // ---- Modal ----
@@ -116,7 +184,7 @@ export function renderMessage(m, { compact = false } = {}) {
   const src = SOURCE[m.source] || SOURCE.system;
   const label = (m.source === 'llm' || m.source === 'collab') && m.model ? `${src.label} · ${m.model}` : src.label;
   return `<div class="msg msg-ai ${m.error ? 'msg-error' : ''}" data-id="${m.id}">
-    <div class="msg-head"><span class="avatar" aria-hidden="true"></span><b>C</b><span class="src ${src.cls}" title="${src.title}">${esc(label)}</span>${compact ? '' : `<time>${fmtTime(m.ts)}</time>`}</div>
+    <div class="msg-head"><span class="avatar" aria-hidden="true"></span><b>CARVIS</b><span class="src ${src.cls}" title="${src.title}">${esc(label)}</span>${compact ? '' : `<time>${fmtTime(m.ts)}</time>`}</div>
     <div class="bubble">${md(m.text)}${renderBlocks(compact ? (m.blocks || []).filter((b) => b.type === 'notice') : m.blocks)}</div>
     ${compact
       ? (m.blocks?.length ? `<button class="link-btn" data-go="#/gpt/chat">Details im GPT-Modus ›</button>` : '')
@@ -129,6 +197,6 @@ export function renderMessage(m, { compact = false } = {}) {
 }
 
 export function thinkingBubble(stage = '') {
-  return `<div class="msg msg-ai msg-thinking"><div class="msg-head"><span class="avatar"></span><b>C</b><span class="src src-sys">verarbeitet …</span></div>
+  return `<div class="msg msg-ai msg-thinking"><div class="msg-head"><span class="avatar"></span><b>CARVIS</b><span class="src src-sys">verarbeitet …</span></div>
     <div class="bubble"><span class="dots"><i></i><i></i><i></i></span>${stage ? `<span class="stage">${esc(stage)}</span>` : ''}</div></div>`;
 }

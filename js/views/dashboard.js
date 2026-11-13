@@ -48,6 +48,13 @@ export default {
     if (el.dataset.dashUlt !== undefined) { actions.setSettings({ ultimateDev: el.checked }); ctx.rerender(); }
   },
   onAct(act, el, ctx) {
+    if (act === 'dash-gpt-window' || act === 'dash-compare') {
+      import('./gpt.js').then((g) => {
+        if (act === 'dash-gpt-window') g.addPanel(); else g.setMode('compare');
+        location.hash = '#/gpt/chat';
+      });
+      return;
+    }
     if (act === 'net-test') { const l = el.closest('.dash')?.querySelector('[data-lat]'); if (l) l.textContent = 'wird gemessen …'; sysmon.measureLatency().then(() => ctx.rerender()); }
   },
   render(s, ctx) {
@@ -79,32 +86,38 @@ export default {
     const latTone = !lat ? 'idle' : lat.med == null ? 'danger' : lat.med < 150 ? 'ok' : lat.med < 400 ? 'warn' : 'danger';
 
     return `<div class="page dash">
-      <section class="cc-hero glass">
-        <div class="cc-left">
-          <p class="eyebrow">Übersicht</p>
+      <section class="dash-top">
+        <div class="card dash-hello">
+          <p class="eyebrow" data-date></p>
           <h1>${greetingByTime()}${s.settings.userName ? `, ${esc(s.settings.userName)}` : ''}.</h1>
           <p class="muted">${open.length ? `<b>${open.length}</b> offene Aufgabe${open.length === 1 ? '' : 'n'} in <b>${s.projects.length}</b> Projekt${s.projects.length === 1 ? '' : 'en'}.` : 'Keine offenen Aufgaben.'}</p>
-          <div class="cc-clock"><span class="big-clock" data-clock="sec"></span><span class="muted" data-date></span></div>
-          <div class="cc-mini">
-            <span class="led led-${engine.tone}"></span><span>${esc(engine.v)} <small>${esc(engine.note)}</small></span>
-          </div>
+          <span class="big-clock" data-clock="sec"></span>
         </div>
-        <div class="cc-right">
-          <h3>Aktivität</h3>
-          <ul class="activity">${s.activity.slice(0, 5).map((a) => `<li>${icon(a.icon || 'dot')}<span>${esc(a.text)}</span><time>${relTime(a.ts)}</time></li>`).join('') || '<li class="muted">Noch keine Aktivität.</li>'}</ul>
+        <div class="card dash-health" aria-label="Systemzustand">
+          <button class="health" data-go="#/gpt/models"><span class="led led-${engine.tone}"></span><b>KI</b><span>${esc(engine.v)}</span><small>${esc(engine.note)}</small></button>
+          <button class="health" data-go="#/gpt/perf"><span class="led led-${agentClient.connected ? 'ok' : 'idle'}"></span><b>Agent</b><span>${agentClient.connected ? 'verbunden' : 'nicht verbunden'}</span><small>${agentClient.connected ? 'PC-Funktionen bereit' : 'nur in der Windows-App'}</small></button>
+          <button class="health" data-act="net-test"><span class="led led-${inf.online ? latTone : 'danger'}"></span><b>Netz</b><span>${inf.online ? 'online' : 'offline'}</span><small>${lat?.med != null ? `${lat.med} ms Antwortzeit` : 'Antwortzeit messen'}</small></button>
+          <button class="health" data-go="#/gpt/settings"><span class="led led-${store.storageOk() ? 'ok' : 'danger'}"></span><b>Daten</b><span>${store.sizeKB()} KB lokal</span><small>${store.storageOk() ? 'gespeichert' : 'Speicherfehler'}</small></button>
         </div>
       </section>
 
-      <div class="cc-strip">
-        <button class="cmd" data-go="#/carvis">${icon('core')}<span>Mit C sprechen</span></button>
-        <button class="cmd" data-act="voice-now">${icon('mic')}<span>Sprachbefehl</span></button>
-        <button class="cmd" data-act="quick-task">${icon('task')}<span>Neue Aufgabe</span></button>
-        <button class="cmd" data-act="quick-project">${icon('project')}<span>Neues Projekt</span></button>
-        <button class="cmd" data-act="quick-plan">${icon('preview')}<span>Plan erstellen</span></button>
-        <button class="cmd" data-go="#/gpt/models">${icon('plug')}<span>KI-Modelle</span></button>
-      </div>
+      <section class="quick" aria-label="Schnellaktionen">
+        <button class="qa" data-go="#/carvis">${icon('core')}<b>Mit CARVIS sprechen</b><small>Sprach- und Textassistent</small></button>
+        <button class="qa" data-act="dash-gpt-window">${icon('window')}<b>Neues KI-Fenster</b><small>im GPT-Arbeitsbereich</small></button>
+        <button class="qa" data-act="dash-compare">${icon('compare')}<b>Modelle vergleichen</b><small>eine Frage, mehrere KIs</small></button>
+        <button class="qa" data-go="#/gpt/perf">${icon('bolt')}<b>PC-Diagnose</b><small>${agentClient.connected ? 'Messen und optimieren' : 'braucht den Desktop-Agenten'}</small></button>
+        <button class="qa" data-go="#/gpt/update">${icon('update')}<b>Updates prüfen</b><small>nur mit Bestätigung</small></button>
+        <button class="qa" data-go="#/gpt/design">${icon('preview')}<b>Design wechseln</b><small>Profile, Hell/Dunkel</small></button>
+        <button class="qa" data-act="quick-task">${icon('task')}<b>Neue Aufgabe</b><small>schnell erfassen</small></button>
+        <button class="qa" data-act="quick-plan">${icon('project')}<b>Plan erstellen</b><small>CARVIS plant mit dir</small></button>
+      </section>
 
       <div class="grid">
+        <section data-dash="activity" class="card glass">
+          <header class="card-head"><h2>${icon('dot')} Aktivität</h2></header>
+          <ul class="activity">${s.activity.slice(0, 6).map((a) => `<li>${icon(a.icon || 'dot')}<span>${esc(a.text)}</span><time>${relTime(a.ts)}</time></li>`).join('') || '<li class="muted">Noch keine Aktivität.</li>'}</ul>
+        </section>
+
         <section data-dash="device" class="card glass" id="mon-device">
           <header class="card-head"><h2>${icon('dashboard')} Gerät</h2><span class="tag tag-ok">GEMESSEN</span></header>
           <div class="gauges">
@@ -155,7 +168,7 @@ export default {
 
         <section data-dash="tasks" class="card glass">
           <header class="card-head"><h2>${icon('task')} Aufgaben</h2><button class="link-btn" data-go="#/gpt/tasks">Alle ›</button></header>
-          ${donut([{ label: 'Erledigt', value: done, color: '#22e4ff' }, { label: 'Offen', value: open.length, color: '#2f6bff' }], String(s.tasks.length))}
+          ${donut([{ label: 'Erledigt', value: done, color: 'rgb(var(--accent-rgb))' }, { label: 'Offen', value: open.length, color: 'var(--surface-4)' }], String(s.tasks.length))}
           <ul class="mini-list">${next.map((t) => `<li><button class="check" data-act="toggle-task" data-id="${t.id}" aria-label="Erledigt"></button><span>${esc(t.title)}</span><span class="tag tag-${t.priority === 'hoch' ? 'danger' : t.priority === 'mittel' ? 'warn' : 'idle'}">${t.priority}</span></li>`).join('') || '<li class="muted">Alles erledigt.</li>'}</ul>
         </section>
 

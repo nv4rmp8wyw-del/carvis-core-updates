@@ -94,11 +94,13 @@ function parseJudge(raw) {
  * @param opts.mode     'carvis' | 'gpt'
  * @param opts.confirm  async (text, opts) => boolean   – Nutzerbestätigung
  * @param opts.onStage  (text) => void                    – Fortschrittsanzeige
+ * @param opts.collab   optional 'always' – Zusammenarbeit nur für diese Anfrage
  * @returns null, wenn kein Modell verfügbar ist
  */
-export async function orchestrate(text, { mode = 'gpt', confirm, onStage = () => {} } = {}) {
+export async function orchestrate(text, { mode = 'gpt', confirm, onStage = () => {}, collab } = {}) {
   const st = store.get();
-  const s = st.settings;
+  // GPT-Modus „Team“: Zusammenarbeit für diese eine Anfrage erzwingen (ohne die Einstellung zu ändern)
+  const s = collab ? { ...st.settings, collab, maxExperts: Math.max(2, st.settings.maxExperts || 2) } : st.settings;
   const task = analyze(text);
   onStage(`Analysiere: ${TYPE_LABEL[task.type]}${task.complex ? ' · komplex' : ''}`);
 

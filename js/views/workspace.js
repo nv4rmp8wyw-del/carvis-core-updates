@@ -7,27 +7,6 @@ import { actions, projectProgress, store } from '../store.js';
 const SUGGESTIONS = ['Was kannst du?', 'Wie gehe ich bei einer eigenen Webseite vor?', 'Zeige meine Aufgaben', 'Visualisiere meine Projekte', 'Analysiere die Risiken von meinem Server-Projekt'];
 export const chips = (list = SUGGESTIONS) => list.map((s) => `<button class="chip" data-act="suggest" data-text="${esc(s)}">${esc(s)}</button>`).join('');
 
-// ---------------- Chat ----------------
-export const chat = {
-  id: 'chat',
-  title: 'Chat',
-  icon: 'chat',
-  selfManaged: true, // Verlauf wird separat aktualisiert, Eingabe bleibt erhalten
-  render() {
-    return `<div class="page chat-page">
-      <header class="page-head compact"><div><h1>Chat</h1><p class="muted small">Gemeinsamer Verlauf mit dem CARVIS-Modus</p></div>
-        <button class="btn btn-ghost btn-sm" data-act="clear-chat">${icon('trash')} Verlauf löschen</button></header>
-      <div class="feed glass" id="gpt-feed" aria-live="polite"></div>
-      <div class="chips">${chips()}</div>
-      <form class="composer composer-gpt" id="gpt-form" autocomplete="off">
-        <button type="button" class="icon-btn mic" data-act="mic" title="Spracheingabe" aria-label="Spracheingabe">${icon('mic')}</button>
-        <textarea name="q" rows="1" placeholder="Nachricht an C …" title="Enter = senden, Shift+Enter = neue Zeile" aria-label="Nachricht"></textarea>
-        <button type="submit" class="icon-btn send" aria-label="Senden"><svg viewBox="0 0 24 24"><path d="M3 20.5 21 12 3 3.5 3 10l12 2-12 2z"/></svg></button>
-      </form>
-    </div>`;
-  },
-};
-
 // ---------------- Projekte ----------------
 export const projects = {
   id: 'projects',
@@ -149,7 +128,7 @@ export const previews = {
     const kinds = (b) => [...new Set(b.map((x) => ({ steps: 'Schritte', risks: 'Risiken', table: 'Tabelle', chart: 'Diagramm', donut: 'Diagramm' }[x.type])).filter(Boolean))];
     return `<div class="page">
       <header class="page-head"><div><p class="eyebrow">Automatisch aus dem Chat gespeichert</p><h1>Vorschauen</h1>
-        <p class="muted">Pläne, Risikoanalysen, Tabellen und Visualisierungen. Frag C z. B. „Wie gehe ich bei einer App vor?“.</p></div></header>
+        <p class="muted">Pläne, Risikoanalysen, Tabellen und Visualisierungen. Frag CARVIS z. B. „Wie gehe ich bei einer App vor?“.</p></div></header>
       <div class="cards">${s.previews.map((p) => `<article class="prev glass" data-act="preview-open" data-id="${p.id}" tabindex="0" role="button">
           <div class="prev-thumb">${renderBlocks(p.blocks.filter((b) => b.type !== 'notice').slice(0, 1))}</div>
           <h3>${esc(p.title)}</h3>
@@ -208,7 +187,7 @@ export const documents = {
               <button type="submit" class="btn btn-primary btn-sm">Speichern</button></div>
             <textarea name="content" placeholder="Schreibe hier … (Markdown wird unterstützt)" aria-label="Inhalt">${esc(d.content)}</textarea>
             <small class="muted">Zuletzt gespeichert ${relTime(d.updated)} · Strg/Cmd + S speichert</small>
-          </form>` : `<div class="doc-empty glass"><p class="muted">Wähle ein Dokument oder lege ein neues an.<br>Tipp: Jede Antwort von C lässt sich im Chat über ${icon('save')} als Dokument speichern.</p></div>`}
+          </form>` : `<div class="doc-empty glass"><p class="muted">Wähle ein Dokument oder lege ein neues an.<br>Tipp: Jede Antwort von CARVIS lässt sich im Chat über ${icon('save')} als Dokument speichern.</p></div>`}
       </div>
     </div>`;
   },
