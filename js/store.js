@@ -178,6 +178,35 @@ export const actions = {
   clearChat() {
     store.update((s) => (s.messages = []), { text: 'Chatverlauf gelöscht', icon: 'chat' });
   },
+  /** Neuer Chat: aktuellen Verlauf ablegen (nicht löschen), dann leer beginnen. */
+  newChat() {
+    store.update((s) => {
+      s.chatArchive ||= [];
+      if (s.messages.length) {
+        const first = s.messages.find((m) => m.role === 'user')?.text || 'Unterhaltung';
+        s.chatArchive.unshift({ id: uid(), ts: s.messages[s.messages.length - 1].ts || Date.now(), title: first.split('\n')[0].slice(0, 60), messages: s.messages });
+        s.chatArchive = s.chatArchive.slice(0, 30);
+      }
+      s.messages = [];
+    }, { text: 'Neuer Chat begonnen', icon: 'chat' });
+  },
+  /** Abgelegten Chat wieder öffnen; der aktuelle wird dabei abgelegt. */
+  openChat(id) {
+    store.update((s) => {
+      s.chatArchive ||= [];
+      const i = s.chatArchive.findIndex((c) => c.id === id);
+      if (i < 0) return;
+      const [c] = s.chatArchive.splice(i, 1);
+      if (s.messages.length) {
+        const first = s.messages.find((m) => m.role === 'user')?.text || 'Unterhaltung';
+        s.chatArchive.unshift({ id: uid(), ts: s.messages[s.messages.length - 1].ts || Date.now(), title: first.split('\n')[0].slice(0, 60), messages: s.messages });
+      }
+      s.messages = c.messages;
+    });
+  },
+  deleteArchivedChat(id) {
+    store.update((s) => { s.chatArchive = (s.chatArchive || []).filter((c) => c.id !== id); });
+  },
   addProject({ name, description = '', status = 'aktiv' }) {
     const p = { id: uid(), name: name.trim(), description, status, created: Date.now(), updated: Date.now() };
     store.update((s) => s.projects.unshift(p), { text: `Projekt angelegt: ${p.name}`, icon: 'project' });

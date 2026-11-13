@@ -13,6 +13,8 @@ const P = {
   settings: 'M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.4 2.9c-.6.3-1.2.6-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1c.5.4 1.1.7 1.7 1L11 21h4l.4-2.9c.6-.3 1.2-.6 1.7-1l2.5 1 2-3.5-2.2-1.6ZM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z',
   ultimate: 'M12 2 9 9H2l5.5 4.5L5 21l7-4.5 7 4.5-2.5-7.5L22 9h-7l-3-7Z',
   core: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 5a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z',
+  clip: 'M16.5 6.5 8.4 14.6a1.5 1.5 0 0 0 2.1 2.1l8.1-8.1a3 3 0 0 0-4.2-4.2l-8.4 8.4a4.5 4.5 0 0 0 6.4 6.4l7.4-7.4 1.4 1.4-7.4 7.4a6.5 6.5 0 0 1-9.2-9.2l8.4-8.4a5 5 0 0 1 7 7l-8.1 8.1a3.5 3.5 0 0 1-5-5l8.1-8.1 1.4 1.4Z',
+  history: 'M13 3a9 9 0 0 0-9 9H1l4 4 4-4H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3Zm-1 5v5l4.25 2.52.77-1.28-3.52-2.09V8H12Z',
   more: 'M5 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z',
   trash: 'M6 7h12l-1 14H7L6 7Zm3-4h6l1 2h4v2H4V5h4l1-2Z',
   plus: 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z',
@@ -177,9 +179,18 @@ const SOURCE = {
   system: { label: 'System', cls: 'src-sys', title: 'Systemmeldung' },
 };
 
+// Anhänge stehen als Block „📎 Anhang: Name“ + Codeblock im Nachrichtentext (so sieht sie auch die KI).
+// In der Anzeige werden sie eingeklappt.
+const ATT_RE = /\n*📎 Anhang: ([^\n]+)\n```[^\n]*\n([\s\S]*?)\n```/g;
+export function userBubble(text = '') {
+  const atts = [];
+  const body = String(text).replace(ATT_RE, (_, name, content) => { atts.push([name, content]); return ''; }).trim();
+  return `${body ? esc(body) : ''}${atts.map(([n, c]) => `<details class="att"><summary>${P.clip ? `<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="${P.clip}"/></svg>` : '📎'} ${esc(n)}</summary><pre>${esc(c.slice(0, 4000))}${c.length > 4000 ? '\n…' : ''}</pre></details>`).join('')}`;
+}
+
 export function renderMessage(m, { compact = false } = {}) {
   if (m.role === 'user') {
-    return `<div class="msg msg-user" data-id="${m.id}"><div class="bubble">${esc(m.text)}</div>${compact ? '' : `<time>${fmtTime(m.ts)}</time>`}</div>`;
+    return `<div class="msg msg-user" data-id="${m.id}"><div class="bubble">${userBubble(m.text)}</div>${compact ? '' : `<time>${fmtTime(m.ts)}</time>`}</div>`;
   }
   const src = SOURCE[m.source] || SOURCE.system;
   const label = (m.source === 'llm' || m.source === 'collab') && m.model ? `${src.label} · ${m.model}` : src.label;

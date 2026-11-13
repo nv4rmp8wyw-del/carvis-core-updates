@@ -2,7 +2,7 @@
 // und fünf Modi (Auto, Einzeln, Vergleich, Review, Team). Keine simulierten Antworten:
 // Fenster ohne verbundenes Modell sagen das ausdrücklich.
 import { esc, md, fmtTime, uid, download } from '../util.js';
-import { icon, toast, popover, confirmDialog } from '../ui.js';
+import { icon, toast, popover, confirmDialog, userBubble } from '../ui.js';
 import { store, actions } from '../store.js';
 import { callExpert, COST_LABEL } from '../ai/providers.js';
 import { chips } from './workspace.js';
@@ -11,10 +11,10 @@ export const MAX_PANELS = 4;
 const MAX_PANEL_MSGS = 60;
 export const MODES = [
   { id: 'auto', label: 'Auto', icon: 'core', hint: 'CARVIS wählt das passende Modell' },
-  { id: 'single', label: 'Einzeln', icon: 'window', hint: 'Nur das ausgewählte Fenster antwortet' },
+  { id: 'single', label: 'Einzelmodell', icon: 'window', hint: 'Nur das ausgewählte Fenster antwortet' },
   { id: 'compare', label: 'Vergleich', icon: 'compare', hint: 'Dieselbe Frage an alle Fenster' },
-  { id: 'review', label: 'Review', icon: 'review', hint: 'Fenster 2 prüft die Antwort von Fenster 1' },
-  { id: 'team', label: 'Team', icon: 'team', hint: 'Mehrere Modelle arbeiten zusammen, CARVIS führt zusammen' },
+  { id: 'review', label: 'Prüfung', icon: 'review', hint: 'Fenster 2 prüft die Antwort von Fenster 1' },
+  { id: 'team', label: 'Teamarbeit', icon: 'team', hint: 'Mehrere Modelle arbeiten zusammen, CARVIS führt zusammen' },
 ];
 const OFFLINE = 'Dieses Modell ist derzeit nicht verbunden.';
 
@@ -82,9 +82,61 @@ function resetLayout() {
 async function newConversation(ctx) {
   const g = ws();
   const p = g.panels[g.focus];
-  if (p.source === 'carvis') {
-    if (await confirmDialog('Unterhaltung mit CARVIS leeren? Der Verlauf wird auch im CARVIS-Bereich gelöscht.', { ok: 'Leeren' })) actions.clearChat();
-  } else save((x) => { x.panels[x.focus].messages = []; });
+  if (p.source === 'carvis') { actions.newChat(); toast('Neuer Chat – der bisherige liegt unter „Verläufe“.', 'ok'); }
+  else save((x) => { x.panels[x.focus].messages = []; });
+}
+
+// ---------------------------------------------------------------- Anhänge (Textdateien)
+const ATT_MAX_FILES = 3;
+const ATT_MAX_BYTES = 300 * 1024;
+const ATT_MAX_CHARS = 12000; // kleine lokale Modelle haben wenig Kontext
+const ATT_TEXT = /\.(txt|md|markdown|csv|tsv|json|xml|html?|css|js|mjs|ts|tsx|jsx|py|rs|java|c|cc|cpp|h|cs|go|rb|php|sh|ps1|bat|ini|cfg|conf|toml|ya?ml|log|sql)$/i;
+let pending = []; // [{ name, size, text, cut }]
+async function addFiles(files) {
+  for (const f of files) {
+    if (pending.length >= ATT_MAX_FILES) { toast(`Höchstens ${ATT_MAX_FILES} Anhänge pro Nachricht.`, 'info'); break; }
+    if (!(ATT_TEXT.test(f.name) || /^text\//.test(f.type) || f.type === 'application/json')) { toast(`„${f.name}“: Bisher werden nur Textdateien unterstützt (z. B. .txt, .md, .csv, Code). Bilder und PDFs folgen.`, 'info'); continue; }
+    if (f.size > ATT_MAX_BYTES) { toast(`„${f.name}“ ist zu groß (max. 300 KB).`, 'info'); continue; }
+    let text = await f.text();
+    const cut = text.length > ATT_MAX_CHARS;
+    if (cut) text = text.slice(0, ATT_MAX_CHARS);
+    pending.push({ name: f.name, size: f.size, text: text.replace(/```/g, "'''"), cut });
+  }
+  paintAttachments();
+}
+function paintAttachments() {
+  const el = view?.querySelector('.gw-atts');
+  if (!el) return;
+  el.innerHTML = pending.map((a, i) => `<span class="chip att-chip">${icon('clip')} ${esc(a.name)} <small>${Math.max(1, Math.round(a.size / 1024))} KB${a.cut ? ' · gekürzt' : ''}</small><button type="button" class="att-x" data-act="gw-att-del" data-i="${i}" aria-label="Anhang ${esc(a.name)} entfernen">×</button></span>`).join('');
+  el.hidden = !pending.length;
+}
+function withAttachments(text) {
+  if (!pending.length) return text;
+  const body = text || 'Bitte sieh dir den Anhang an und fasse das Wichtigste zusammen.';
+  const F = '```';
+  const att = pending.map((a) => `\n\n📎 Anhang: ${a.name}${a.cut ? ' (gekürzt)' : ''}\n${F}\n${a.text}\n${F}`).join('');
+  pending = [];
+  paintAttachments();
+  return body + att;
+}
+
+// ---------------------------------------------------------------- Verläufe
+function historyItems(ctx) {
+  const st = store.get();
+  const list = st.chatArchive || [];
+  const fmtD = (ts) => new Date(ts).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return [
+    { label: 'Neuer Chat', icon: 'plus', hint: st.messages.length ? 'aktuellen ablegen' : '', run: () => newConversation(ctx) },
+    { sec: list.length ? `Frühere Chats (${list.length})` : 'Noch keine früheren Chats' },
+    ...list.map((c) => ({ label: c.title || 'Unterhaltung', icon: 'chat', hint: fmtD(c.ts), run: () => { actions.openChat(c.id); toast('Chat geöffnet.', 'ok'); } })),
+    ...(list.length ? [{ sec: 'Aufräumen' }, { label: 'Ältesten abgelegten Chat löschen', icon: 'trash', run: async () => { const c = list[list.length - 1]; if (await confirmDialog(`„${c.title}“ endgültig löschen?`, { ok: 'Löschen', danger: true })) actions.deleteArchivedChat(c.id); } }] : []),
+  ];
+}
+function modelStatus(st) {
+  const ok = st.experts.filter((e) => e.enabled && e.status === 'ok' && (e.cost !== 'paid' || st.settings.allowPaid)).length;
+  return ok
+    ? `<button class="pill gw-status" data-go="#/gpt/models" title="Verbundene KI-Modelle verwalten"><span class="led led-ok"></span>${ok} KI-Modell${ok === 1 ? '' : 'e'} bereit</button>`
+    : `<button class="pill gw-status" data-go="#/gpt/models" title="Ohne verbundene KI sind freie Antworten nur Vorlagen. Klicken zum Verbinden."><span class="led led-warn"></span>Keine KI verbunden · verbinden</button>`;
 }
 function exportMarkdown() {
   const st = store.get();
@@ -158,7 +210,7 @@ async function askPanel(panelId, text, { quiet = false } = {}) {
 
 /** Einstieg aus dem Eingabefeld. ctx.send = CARVIS-Pipeline (gemeinsamer Verlauf mit dem CARVIS-Bereich). */
 export async function sendFromComposer(text, ctx) {
-  text = (text || '').trim();
+  text = withAttachments((text || '').trim());
   if (!text) return;
   const g = ws();
   const carvisPanel = g.panels.find((p) => p.source === 'carvis');
@@ -192,7 +244,7 @@ export async function sendFromComposer(text, ctx) {
 
 // ---------------------------------------------------------------- Darstellung
 function msgHtml(m, p) {
-  if (m.role === 'user') return `<div class="msg msg-user"><div class="bubble">${esc(m.text)}</div><time>${fmtTime(m.ts)}</time></div>`;
+  if (m.role === 'user') return `<div class="msg msg-user"><div class="bubble">${userBubble(m.text)}</div><time>${fmtTime(m.ts)}</time></div>`;
   return `<div class="msg msg-ai ${m.error ? 'msg-error' : ''}">
     <div class="msg-head"><span class="avatar" aria-hidden="true"></span><b>${esc(m.model || panelLabel(p))}</b>${m.error ? '' : '<span class="src src-llm" title="Antwort eines echten Sprachmodells">KI-Modell</span>'}<time>${fmtTime(m.ts)}${m.ms ? ` · ${(m.ms / 1000).toFixed(1)} s` : ''}</time></div>
     <div class="bubble">${m.error ? esc(m.text) : md(m.text)}</div>
@@ -313,7 +365,7 @@ function moreItems(ctx) {
     { sec: 'Modus' },
     ...MODES.map((m) => ({ label: m.label, icon: m.icon, on: g.mode === m.id, title: m.hint, run: () => { setMode(m.id); paintAll(ctx); } })),
     { sec: 'Unterhaltung' },
-    { label: 'Neue Unterhaltung (ausgewähltes Fenster)', icon: 'chat', run: () => newConversation(ctx) },
+    { label: 'Neuer Chat (ausgewähltes Fenster)', icon: 'chat', run: () => newConversation(ctx) },
     { label: 'Arbeitsbereich exportieren (Markdown)', icon: 'share', run: exportMarkdown },
     { sec: 'Werkzeuge' },
     { label: 'KI-Modelle verwalten', icon: 'plug', run: go('#/gpt/models') },
@@ -336,18 +388,20 @@ export const gpt = {
     const g = ws();
     return `<div class="gw" data-gw>
       <div class="gw-bar">
-        <h1>GPT</h1>
+        ${modelStatus(s)}
         <div class="seg" role="group" aria-label="Multi-KI-Modus">${MODES.map((m) => `<button data-act="gw-mode" data-gw-mode="${m.id}" class="${g.mode === m.id ? 'on' : ''}" aria-pressed="${g.mode === m.id}" title="${esc(m.hint)}">${m.label}</button>`).join('')}</div>
         <span class="grow"></span>
-        <span class="gw-hint">${g.panels.length}/${MAX_PANELS} Fenster</span>
-        <button class="btn btn-sm" data-act="gw-add" ${g.panels.length >= MAX_PANELS ? 'disabled' : ''} title="Weiteres KI-Fenster öffnen">${icon('plus')} Fenster</button>
+        <button class="btn btn-sm" data-act="gw-history" aria-haspopup="menu" aria-expanded="false" title="Neuer Chat und frühere Chats">${icon('history')} Verläufe</button>
+        <button class="btn btn-sm" data-act="gw-add" ${g.panels.length >= MAX_PANELS ? 'disabled' : ''} title="Weiteres KI-Fenster öffnen (${g.panels.length}/${MAX_PANELS})">${icon('plus')} KI-Fenster</button>
         <button class="btn btn-sm" data-act="gw-more" aria-haspopup="menu" aria-expanded="false">${icon('more')} Mehr</button>
       </div>
       <div class="gw-mob-tabs" aria-label="KI-Fenster">${mobTabs(g, s)}</div>
       <div class="gw-panels" data-n="${g.panels.length}" style="--cols:${colsVar(g)}">${g.panels.map((p, i) => panelHtml(p, i, g, s)).join('')}</div>
       <div class="gw-compose">
         <div class="chips">${chips()}</div>
+        <div class="gw-atts" hidden></div>
         <form class="composer composer-gpt" id="gpt-form" autocomplete="off">
+          <label class="icon-btn" title="Textdatei anhängen (.txt, .md, .csv, Code – max. 300 KB)" aria-label="Datei anhängen">${icon('clip')}<input type="file" multiple data-gw-attach hidden></label>
           <button type="button" class="icon-btn mic" data-act="mic" title="Spracheingabe" aria-label="Spracheingabe">${icon('mic')}</button>
           <textarea name="q" rows="1" placeholder="Nachricht …" title="Enter = senden, Shift+Enter = neue Zeile" aria-label="Nachricht"></textarea>
           <button type="submit" class="icon-btn send" aria-label="Senden"><svg viewBox="0 0 24 24"><path d="M3 20.5 21 12 3 3.5 3 10l12 2-12 2z"/></svg></button>
@@ -359,6 +413,11 @@ export const gpt = {
   onMount(root, ctx) {
     view = root.querySelector('[data-gw]');
     vctx = ctx;
+    paintAttachments();
+    view.querySelector('[data-gw-attach]')?.addEventListener('change', (e) => { addFiles([...e.target.files]); e.target.value = ''; });
+    view.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); view.classList.add('drop'); } });
+    view.addEventListener('dragleave', (e) => { if (e.target === view) view.classList.remove('drop'); });
+    view.addEventListener('drop', (e) => { if (!e.dataTransfer?.files?.length) return; e.preventDefault(); view.classList.remove('drop'); addFiles([...e.dataTransfer.files]); });
     ctx.paintFeeds?.();
     root.querySelectorAll('.gw-feed').forEach((f) => (f.scrollTop = f.scrollHeight));
     // Fokus per Klick ins Fenster
@@ -404,6 +463,8 @@ export const gpt = {
     if (act === 'gw-focus') { save((x) => { x.focus = i; }); paintAll(ctx); }
     if (act === 'gw-stop') running.get(ws().panels[i]?.id)?.abort();
     if (act === 'gw-more') popover(el, moreItems(ctx), { align: 'end', label: 'Mehr' });
+    if (act === 'gw-history') popover(el, historyItems(ctx), { align: 'end', label: 'Verläufe' });
+    if (act === 'gw-att-del') { pending.splice(+el.dataset.i, 1); paintAttachments(); }
     if (act === 'gw-panel-menu') {
       const g = ws();
       const p = g.panels[i];

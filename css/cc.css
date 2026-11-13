@@ -872,6 +872,20 @@ body.reduce-motion { --g-blur: 12px; }
   :root[data-look='glass'] { --g-fill: rgba(20, 22, 28, 0.95); --g-fill-2: rgba(26, 28, 35, 0.98); }
 }
 
+/* GPT-Hauptchat: Status, Anhänge, Ablegen */
+.gw-status { cursor: pointer; font-size: calc(12px * var(--ts)); }
+.gw-status:hover { border-color: var(--g-edge-hi); }
+.gw-atts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.att-chip { display: inline-flex; align-items: center; gap: 6px; }
+.att-chip small { color: var(--muted); }
+.att-x { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
+.att-x:hover { color: var(--text); }
+.gw.drop .gw-panels { outline: 2px dashed rgba(var(--accent-rgb), 0.6); outline-offset: -6px; }
+.bubble details.att { margin-top: 8px; border: 1px solid var(--g-edge, var(--line)); border-radius: 10px; padding: 6px 10px; background: rgba(0, 0, 0, 0.15); }
+.bubble details.att summary { cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: calc(12.5px * var(--ts)); }
+.bubble details.att pre { max-height: 240px; overflow: auto; white-space: pre-wrap; font-size: 12px; margin: 8px 0 0; }
+.composer-gpt label.icon-btn { cursor: pointer; }
+
 /* Ehrliche Zustände: ohne KI gedämpfter Kern, offline entsättigt */
 body[data-ai='none'][data-core='idle'] #core { opacity: 0.55; filter: saturate(0.45); transition: opacity var(--t-slow), filter var(--t-slow); }
 body[data-net='off'][data-core='idle'] #core { opacity: 0.4; filter: grayscale(1); }
