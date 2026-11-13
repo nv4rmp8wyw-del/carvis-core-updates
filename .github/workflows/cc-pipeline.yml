@@ -1,0 +1,273 @@
+# CARVIS CORE – kostenlose Build- und Veröffentlichungsstrecke (Inhaber-Entscheidung 13.11.2026, 23:43).
+#
+# Warum hier? Im privaten Quell-Repo ist das kostenlose Actions-Kontingent aufgebraucht; Budget 0 €.
+# In öffentlichen Repos sind GitHub Actions kostenlos. Der Quellcode bleibt privat: er wird nur zum Bauen
+# und Testen ausgecheckt, nie hochgeladen. Öffentlich sind (wie bisher) nur Website und geprüfte Installer.
+# Hinweis: Protokolle dieser Läufe sind öffentlich sichtbar.
+#
+# Ablauf:
+#   1. alle 20 Minuten (oder von Hand): neuer Commit auf main im privaten Repo?
+#   2. Tests wie im privaten ci.yml (Agent, Syntax, Browser mit echten Klicks, echte KI mit Ollama)
+#   3. Windows: Installer + portable EXE bauen, installieren, starten, Migration 3.6.7, Update-Kette, portabler Start
+#   4. NUR wenn alles grün und Quelle = main und Version freigegeben (3.x immer; ab 4.0 nur mit Eintrag in
+#      .github/release-freigabe.txt): Website (gh-pages) aktualisieren; bei neuer Versionsnummer öffentliches Release.
+#
+# Secret SOURCE_TOKEN: fein granularer Zugriffsschlüssel NUR für nv4rmp8wyw-del/carvis-core-c, "Contents: Read-only".
+name: CC bauen, testen, veröffentlichen
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Zweig/Commit im privaten Repo (Standard main)"
+        default: main
+      veroeffentlichen:
+        description: "Bei Erfolg veröffentlichen (nur wirksam für main)"
+        type: boolean
+        default: true
+      erzwingen:
+        description: "Auch bauen, wenn dieser Commit schon veröffentlicht ist"
+        type: boolean
+        default: false
+concurrency:
+  group: cc-pipeline-${{ github.event.inputs.ref || 'main' }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+env:
+  QUELLE: nv4rmp8wyw-del/carvis-core-c
+  REF: ${{ github.event.inputs.ref || 'main' }}
+
+jobs:
+  pruefen:
+    name: Neuer Stand?
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.s.outputs.sha }}
+      bauen: ${{ steps.s.outputs.bauen }}
+    steps:
+      - name: Commit im privaten Repo und letzten veröffentlichten Stand vergleichen
+        id: s
+        env:
+          GH_TOKEN: ${{ secrets.SOURCE_TOKEN }}
+          ERZWINGEN: ${{ github.event.inputs.erzwingen || 'false' }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::error::Secret SOURCE_TOKEN fehlt (siehe Kopf dieser Datei)."; exit 1; fi
+          sha=$(gh api "repos/$QUELLE/commits/$REF" --jq .sha)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          letzt=$(curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/gh-pages/.quelle" 2>/dev/null || true)
+          echo "Quelle $REF = ${sha::7}, zuletzt veröffentlicht: ${letzt::7}"
+          if [ "$REF" = "main" ] && [ "$sha" = "$letzt" ] && [ "$ERZWINGEN" != "true" ]; then
+            echo "Nichts Neues."; echo "bauen=nein" >> "$GITHUB_OUTPUT"
+          else
+            echo "bauen=ja" >> "$GITHUB_OUTPUT"
+          fi
+
+  tests:
+    name: Tests (Agent, Web, Browser)
+    needs: pruefen
+    if: needs.pruefen.outputs.bauen == 'ja'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: "${{ env.QUELLE }}", ref: "${{ needs.pruefen.outputs.sha }}", token: "${{ secrets.SOURCE_TOKEN }}" }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Agent-, Versions-, Namens- und Update-Tests
+        run: |
+          set -e
+          python tools/test-agent.py
+          python tools/test-public-updates.py
+          python tools/test-version.py
+          python tools/test-names.py
+          python tools/make-dist.py
+      - name: Alle JS-Module auf Syntaxfehler prüfen
+        run: |
+          set -e
+          for f in $(git ls-files 'js/*.js' 'js/**/*.js' 'sw.js'); do node --input-type=module --check < "$f" || { echo "Syntaxfehler: $f"; exit 1; }; done
+          node tools/test-free-router.cjs
+          node tools/test-preview-updates.cjs
+      - name: Playwright (nur für Tests)
+        run: |
+          npm install --no-save --no-package-lock playwright@1.49.1
+          npx playwright install --with-deps chromium
+      - name: Browser-Tests mit echten Klicks (Liste aus dem privaten ci.yml)
+        run: |
+          set -e
+          python3 tools/dev-server.py > /tmp/dev.log 2>&1 &
+          sleep 2
+          liste=$(grep -oP 'for t in \K[^;]+(?=; do)' .github/workflows/ci.yml | head -1)
+          [ -n "$liste" ] || { echo "Testliste in ci.yml nicht gefunden"; exit 1; }
+          for t in $liste; do echo "::group::$t"; node tools/$t.js; echo "::endgroup::"; done
+
+  echte-ki:
+    name: Echte KI (Ollama, kein Mock)
+    needs: pruefen
+    if: needs.pruefen.outputs.bauen == 'ja'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: "${{ env.QUELLE }}", ref: "${{ needs.pruefen.outputs.sha }}", token: "${{ secrets.SOURCE_TOKEN }}" }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Ollama + Playwright
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          sudo systemctl stop ollama || true
+          sudo systemctl disable ollama || true
+          npm install --no-save --no-package-lock playwright@1.49.1
+          npx playwright install --with-deps chromium
+      - name: Echter KI-Test
+        run: |
+          if [ ! -f tools/v391-real-ollama-test.js ]; then echo "Kein Echt-KI-Test in diesem Stand."; exit 0; fi
+          python3 tools/dev-server.py > /tmp/dev.log 2>&1 &
+          sleep 2
+          node tools/v391-real-ollama-test.js
+
+  windows:
+    name: Windows (bauen, installieren, testen)
+    needs: pruefen
+    if: needs.pruefen.outputs.bauen == 'ja'
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: "${{ env.QUELLE }}", ref: "${{ needs.pruefen.outputs.sha }}", token: "${{ secrets.SOURCE_TOKEN }}" }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: "src-tauri" }
+      - name: Agent-Tests (Windows)
+        run: python tools/test-agent.py
+      - name: Vorgänger-Build (für den Versionssprung-Test) bauen und beiseitelegen
+        run: |
+          python tools/stamp-build.py ([int]"${{ github.run_number }}" - 1)
+          python tools/make-dist.py
+          npx --yes @tauri-apps/cli@2 icon icons/icon-512.png
+          pip install pyinstaller
+          pyinstaller --onefile --name carvis-agent --distpath agent-dist tools/desktop-agent.py
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
+          Copy-Item agent-dist/carvis-agent.exe src-tauri/binaries/carvis-agent-x86_64-pc-windows-msvc.exe
+          npx --yes @tauri-apps/cli@2 build
+          $d = Join-Path $env:RUNNER_TEMP "build-A"
+          New-Item -ItemType Directory -Force $d | Out-Null
+          Move-Item src-tauri/target/release/bundle/nsis/*-setup.exe $d
+      - name: Endgültigen Installer bauen (ohne Testnummer, so wie er ausgeliefert wird)
+        run: |
+          git checkout -- js/version.js src-tauri/tauri.conf.json src-tauri/Cargo.toml tools/desktop-agent.py
+          python tools/make-dist.py
+          pyinstaller --onefile --name carvis-agent --distpath agent-dist tools/desktop-agent.py
+          Copy-Item agent-dist/carvis-agent.exe src-tauri/binaries/carvis-agent-x86_64-pc-windows-msvc.exe -Force
+          npx --yes @tauri-apps/cli@2 build
+      - name: Installierte App testen
+        run: python tools/test-windows-app.py
+      - name: 3.6.7-Installer aus dem privaten Release laden
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.SOURCE_TOKEN }}
+        run: |
+          $d = Join-Path $env:RUNNER_TEMP "old-367"
+          New-Item -ItemType Directory -Force $d | Out-Null
+          gh release download v3.6.7 --repo $env:QUELLE --pattern "CARVIS-CORE_3.6.7_x64-setup.exe" --pattern "SHA256SUMS.txt" --dir $d
+          if ($LASTEXITCODE -ne 0) { throw "Download des 3.6.7-Releases fehlgeschlagen" }
+      - name: Umstieg 3.6.7 -> neu und Rückweg (Nutzerdaten bleiben)
+        run: python tools/test-migration.py (Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe).FullName
+      - name: Update-Kette (echte Installation, GitHub-Attrappe)
+        run: python tools/test-update-chain.py (Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe).FullName (Get-ChildItem "$env:RUNNER_TEMP/build-A/*-setup.exe").FullName
+      - name: Portable CARVIS-CORE.exe bauen und testen
+        run: |
+          $env:CARVIS_AGENT_EXE = (Resolve-Path agent-dist/carvis-agent.exe).Path
+          npx --yes @tauri-apps/cli@2 build --no-bundle --features portable
+          New-Item -ItemType Directory -Force portable | Out-Null
+          Copy-Item src-tauri/target/release/carvis-core.exe portable/CARVIS-CORE.exe -Force
+          python tools/test-portable.py portable/CARVIS-CORE.exe
+      - name: Dateien sammeln (nur Installer und portable EXE – kein Quellcode)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item src-tauri/target/release/bundle/nsis/*-setup.exe out/
+          Copy-Item portable/CARVIS-CORE.exe out/
+          Get-ChildItem out -File | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content -Encoding ascii out/SHA256SUMS.txt
+          Get-Content out/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with: { name: windows, path: out/*, retention-days: 7 }
+
+  veroeffentlichen:
+    name: Veröffentlichen (Website + Release)
+    needs: [pruefen, tests, echte-ki, windows]
+    if: needs.pruefen.outputs.bauen == 'ja' && (github.event.inputs.ref || 'main') == 'main' && (github.event_name == 'schedule' || github.event.inputs.veroeffentlichen == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: "${{ env.QUELLE }}", ref: "${{ needs.pruefen.outputs.sha }}", token: "${{ secrets.SOURCE_TOKEN }}", path: src }
+      - name: Version und Freigabe prüfen
+        id: v
+        working-directory: src
+        run: |
+          v=$(sed -n "s/^export const VERSION = '\([^']*\)'.*/\1/p" js/version.js)
+          t=$(python3 -c "import json;print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          [ "$v" = "$t" ] || { echo "::error::Version uneinheitlich: $v / $t"; exit 1; }
+          frei=ja
+          if [ "${v%%.*}" -ge 4 ]; then
+            f=$(grep -v '^#' .github/release-freigabe.txt 2>/dev/null | tr -d '[:space:]' || true)
+            [ "$f" = "$v" ] || { frei=nein; echo "::warning::$v ist nicht freigegeben (.github/release-freigabe.txt: '${f:-leer}') – nichts veröffentlicht."; }
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"; echo "frei=$frei" >> "$GITHUB_OUTPUT"
+      - name: Web-App zusammenstellen
+        if: steps.v.outputs.frei == 'ja'
+        working-directory: src
+        run: |
+          python3 tools/make-dist.py
+          S=$(echo "${{ needs.pruefen.outputs.sha }}" | cut -c1-7)
+          sed -i -E "s/^const CACHE = '([^']*)';/const CACHE = '\1-$S';/" dist/sw.js
+          grep -m1 "^const CACHE" dist/sw.js
+          if grep -rEq "ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9]{32,}" dist; then echo "::error::Möglicher Schlüssel gefunden"; exit 1; fi
+      - name: Website (gh-pages) aktualisieren
+        if: steps.v.outputs.frei == 'ja'
+        run: |
+          git clone --depth 1 --branch gh-pages "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" site
+          cd site
+          find . -mindepth 1 -maxdepth 1 ! -name .git ! -name README.md -exec rm -rf {} +
+          cp -r ../src/dist/. .
+          touch .nojekyll
+          echo "${{ needs.pruefen.outputs.sha }}" > .quelle
+          git add -A
+          git config user.name "CARVIS CORE CI"; git config user.email "ci@users.noreply.github.com"
+          git diff --cached --quiet && { echo "Unverändert."; exit 0; }
+          git commit -q -m "Web-App ${{ steps.v.outputs.version }} (${{ needs.pruefen.outputs.sha }})"
+          git push origin gh-pages
+      - uses: actions/download-artifact@v4
+        if: steps.v.outputs.frei == 'ja'
+        with: { name: windows, path: out }
+      - name: Öffentliches Release bei neuer Versionsnummer
+        if: steps.v.outputs.frei == 'ja'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          if gh release view "v$V" --repo "${{ github.repository }}" >/dev/null 2>&1; then echo "Release v$V existiert bereits."; exit 0; fi
+          cat > notes.md <<EOF
+          CARVIS CORE $V für Windows (x64).
+
+          - **Installer:** \`CARVIS-CORE_${V}_x64-setup.exe\` – installieren und starten.
+          - **Portable:** \`CARVIS-CORE.exe\` – ohne Installation starten.
+          - Nicht code-signiert: Windows SmartScreen zeigt „Unbekannter Herausgeber“ → „Weitere Informationen“ → „Trotzdem ausführen“.
+          - Prüfsummen: \`SHA256SUMS.txt\`
+
+          Vor der Veröffentlichung auf einem GitHub-Windows-Runner geprüft: Installation, Start mit Agent, Umstieg von 3.6.7 und zurück, Update-Kette, portabler Start; dazu Browser-Tests und ein echter KI-Test. Nicht auf einem Nutzer-PC getestet.
+
+          Im Browser nutzen: https://nv4rmp8wyw-del.github.io/carvis-core-updates/
+          EOF
+          gh release create "v$V" out/* --repo "${{ github.repository }}" --title "CARVIS CORE $V" --notes-file notes.md --latest
