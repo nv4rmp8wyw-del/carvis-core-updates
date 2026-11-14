@@ -68,7 +68,7 @@ export default {
           <p class="muted small">Anmeldung bei GitHub über einen Gerätecode. Das Zugriffstoken bleibt im Agenten (unter Windows mit dem Benutzerkonto verschlüsselt) und wird nie angezeigt. Installiert wird nur nach deinem Klick, nur eine mit SHA-256 geprüfte Datei.</p>
           ${P.err ? `<div class="notice notice-warn" data-priv-error>${esc(P.err)}</div>` : ''}
           ${!P.st?.loggedIn ? (P.login ? `<div class="notice" data-priv-code>Öffne <b>${esc(P.login.verificationUri)}</b> und gib den Code <b style="font-size:1.3rem;letter-spacing:.1em">${esc(P.login.userCode)}</b> ein. Diese Seite wartet auf deine Bestätigung …</div>
-            <button class="btn" data-act="priv-cancel">Abbrechen</button>` : `<div class="inline-fields"><label class="field">Client-ID der GitHub App<input id="priv-client" type="text" value="${esc(P.st?.clientId || '')}" placeholder="Iv1.… oder Iv23…"></label></div>
+            <button class="btn" data-act="priv-cancel">Abbrechen</button>` : `<div class="inline-fields"><label class="field">Client-ID der GitHub App<input id="priv-client" type="text" value="${esc(P.clientDraft ?? P.st?.clientId ?? '')}" placeholder="Iv1.… oder Iv23…"></label></div>
             <button class="btn btn-primary" data-act="priv-login" ${P.busy ? 'disabled' : ''}>Mit GitHub anmelden</button>`)
           : `<p class="small"><span class="led led-ok"></span> Angemeldet${P.st.tokenProtected ? ' (Token verschlüsselt)' : ' (Token lokal, nicht verschlüsselt)'} · Version ${esc(currentVersion())}</p>
             <button class="btn btn-primary" data-act="priv-check" ${P.busy ? 'disabled' : ''}>${P.busy === 'check' ? 'Suche …' : 'Nach privaten Updates suchen'}</button>
@@ -91,8 +91,9 @@ export default {
     if (el.dataset.setUpdate) { actions.setSettings({ [el.dataset.setUpdate]: el.checked }); ctx.rerender(); }
   },
   onMount(root, ctx) {
+    root.querySelector('#priv-client')?.addEventListener('input', (e) => { P.clientDraft = e.target.value; }); // Eingabe übersteht ein Neuzeichnen
     root.querySelector('[data-adv]')?.addEventListener('toggle', (e) => { S.advOpen = e.target.open; });
-    if (agentClient.connected && !P.st) agentClient.updStatus().then((r) => { P.st = r; if (root.dataset.view === 'update') ctx.rerender(); }).catch(() => {});
+    if (agentClient.connected && !P.st) agentClient.updStatus().then((r) => { P.st = r; if (root.dataset.view === 'update') (ctx.softRerender || ctx.rerender)(); }).catch(() => {});
     // Erster Besuch: direkt prüfen. Ein erneutes Rendern startet keine Endlosschleife.
     if (!S.checked && !S.busy) this.onAct('update-check', null, ctx);
   },

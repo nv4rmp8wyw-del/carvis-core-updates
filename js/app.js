@@ -1,7 +1,7 @@
 // CARVIS CORE – App-Steuerung: Routing, Moduswechsel, Chat-Pipeline, Sprache, Ereignisse.
 import { VERSION } from './version.js';
 import { nextGreeting } from './greeting.js';
-import { $, $$, esc, fmtTime, fmtDateLong, plainText, sleep, greetingByTime } from './util.js';
+import { md, $, $$, esc, fmtTime, fmtDateLong, plainText, sleep, greetingByTime } from './util.js';
 import { store, actions } from './store.js';
 import { HoloCore } from './core.js';
 import { applyTheme, applySpeed, onThemeApplied, hexToHsl } from './theme.js';
@@ -66,6 +66,8 @@ let viewId = 'dashboard';
 let busy = false;
 let coreState = 'idle';
 let pendingRender = false;
+let answerCtrl = null; // Abbruch der laufenden Antwort (Stopp-Knopf)
+let partial = ''; // gestreamter Antworttext
 let stage = '';
 let greetingPending = false;
 
@@ -83,6 +85,8 @@ applyTheme(store.get().settings.theme);
 const ctx = {
   status,
   rerender: () => renderView(),
+  // Für Hintergrund-Ergebnisse (Status nachgeladen o. Ä.): nicht neu zeichnen, solange ein Textfeld bearbeitet oder geklickt wird
+  softRerender: () => { if ((viewEl.contains(document.activeElement) && isTextField(document.activeElement)) || pointerDown) { pendingRender = true; return; } renderView(); },
   renderStatus: () => renderStatus(true),
   send: (text, opts) => send(text, opts),
   paintFeeds: () => renderFeeds(),
@@ -241,13 +245,13 @@ function closeSheet() {
 function renderFeeds() {
   const msgs = store.get().messages;
   const cf = $('#carvis-feed');
-  cf.innerHTML = msgs.slice(-4).map((m) => renderMessage(m, { compact: true })).join('') + (busy ? thinkingBubble(stage) : '');
+  cf.innerHTML = msgs.slice(-4).map((m) => renderMessage(m, { compact: true })).join('') + (busy ? thinkingBubble(stage, partial) : '');
   cf.scrollTop = cf.scrollHeight;
   app.classList.toggle('has-chat', msgs.length > 0 || busy);
   const gf = $('#gpt-feed');
   if (gf) {
     gf.innerHTML = msgs.length || busy
-      ? msgs.map((m) => renderMessage(m)).join('') + (busy ? thinkingBubble(stage) : '')
+      ? msgs.map((m) => renderMessage(m)).join('') + (busy ? thinkingBubble(stage, partial) : '')
       : `<div class="gw-empty"><div class="mini-core" aria-hidden="true"></div><b>CARVIS · Auto</b><span>CARVIS wählt für jede Frage das passende verbundene Modell. Gemeinsamer Verlauf mit dem CARVIS-Bereich.</span></div>`;
     gf.scrollTop = gf.scrollHeight;
   }
@@ -261,6 +265,9 @@ async function send(text, { viaVoice = false, collab } = {}) {
   actions.addMessage({ role: 'user', text });
   busy = true;
   stage = '';
+  partial = '';
+  answerCtrl = new AbortController();
+  const ctrl = answerCtrl;
   setCore('thinking');
   renderFeeds();
   const t0 = performance.now();
@@ -269,6 +276,15 @@ async function send(text, { viaVoice = false, collab } = {}) {
     res = await respond(text, {
       mode,
       collab,
+      signal: ctrl.signal,
+      // Streaming: Teilantwort sofort zeigen (nur die Textfläche, kein Neuaufbau des Verlaufs)
+      onToken: (t) => {
+        const first = !partial;
+        partial = t;
+        if (first) { renderFeeds(); return; }
+        $$('.msg-thinking .stream').forEach((el) => { el.innerHTML = md(t); });
+        const gf = $('#gpt-feed'); if (gf) gf.scrollTop = gf.scrollHeight;
+      },
       confirm: (msg, o) => confirmDialog(msg, o),
       onStage: (st) => {
         stage = st;
@@ -280,6 +296,12 @@ async function send(text, { viaVoice = false, collab } = {}) {
   } catch (e) {
     res = { text: `Interner Fehler: ${e.message}`, source: 'system', error: true, blocks: [] };
   }
+  if (ctrl.signal.aborted) {
+    // Kein Ersatztext nach Abbruch: nur das, was das Modell bis dahin wirklich geschrieben hat
+    res = { text: partial ? `${partial}\n\n*– abgebrochen –*` : 'Abgebrochen.', source: partial ? 'llm' : 'system', model: res?.model, blocks: [] };
+  }
+  answerCtrl = null;
+  partial = '';
   const wait = 700 - (performance.now() - t0); // Verarbeitungszustand sichtbar halten
   if (wait > 0) await sleep(wait);
   if (res.executed) { setCore('executing'); await sleep(650); }
@@ -456,6 +478,7 @@ async function quickText(title, label, placeholder) {
 // =============================================================
 const GLOBAL = {
   mic: () => toggleMic(),
+  'stop-answer': () => { answerCtrl?.abort(); },
   'stop-speak': () => { voice.cancelSpeak(); if (coreState === 'speaking') setCore('idle'); },
   'voice-gate': () => { hideVoiceGate(); greet(true); },
   'voice-now': () => { location.hash = '#/carvis'; toggleMic(); },
@@ -545,7 +568,7 @@ document.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && t.matches?.('[role="button"][data-act]')) { e.preventDefault(); t.click(); }
   if (t.matches?.('#gpt-form textarea') && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); t.form.requestSubmit(); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's' && t.closest?.('[data-form="doc-save"]')) { e.preventDefault(); t.closest('form').requestSubmit(); }
-  if (e.key === 'Escape' && mode === 'carvis') { if (voice.listening) voice.stop(); voice.cancelSpeak(); }
+  if (e.key === 'Escape' && mode === 'carvis') { if (voice.listening) voice.abort(); voice.cancelSpeak(); }
 });
 
 document.addEventListener('input', (e) => {
@@ -637,20 +660,52 @@ setTimeout(autoConnect, 0);
 // =============================================================
 async function autoConnect() {
   // Windows-App: erst den integrierten Agenten verbinden (er leitet auch Ollama durch)
-  const app = await import('./agent-client.js').then((m) => m.autoConnectApp()).catch(() => ({ app: false }));
-  if (app.app && app.ok) toast('Integrierter Agent verbunden', 'ok');
-  else if (app.app) toast('Integrierter Agent nicht verfügbar: ' + app.error, 'warn');
-  const { discoverOllama, makeExpert } = await import('./ai/providers.js');
-  if (app.ok || ['localhost', '127.0.0.1'].includes(location.hostname)) {
-    try {
-      const names = await discoverOllama(store.get().settings.ollamaUrl);
-      const known = new Set(store.get().experts.map((e) => e.id));
-      const fresh = names.map((n) => makeExpert({ provider: 'ollama', vendorKey: 'ollama', model: n, label: `${n} · Ollama`, cost: 'free', local: true })).filter((e) => !known.has(e.id));
-      fresh.forEach((e) => actions.upsertExpert(e));
-      if (fresh.length) toast(`${fresh.length} lokale KI-Modelle automatisch verbunden`, 'ok');
-    } catch { /* Ollama läuft nicht – kein Problem */ }
+  const m = await import('./agent-client.js').catch(() => null);
+  const app = m ? await m.autoConnectApp().catch((e) => ({ app: true, ok: false, error: String(e) })) : { app: false };
+  if (app.app && app.ok) { toast('Integrierter Agent verbunden', 'ok'); await afterAgent(m); }
+  else if (app.app) {
+    toast('Integrierter Agent nicht verfügbar: ' + app.error, 'warn');
+    // weiter im Hintergrund versuchen (alle 10 s, höchstens 5 Minuten), damit ein verspäteter Agent noch angemeldet wird
+    if (!/Token falsch|konnte nicht gestartet|beendet, bevor/.test(app.error || '')) {
+      let n = 0, running = false;
+      const iv = setInterval(async () => {
+        if (running) return;
+        if (m.agentState.connected || ++n > 30) return clearInterval(iv);
+        running = true;
+        const r = await m.autoConnectApp(5000).catch(() => ({}));
+        running = false;
+        if (r.ok) { clearInterval(iv); toast('Integrierter Agent verbunden', 'ok'); await afterAgent(m); }
+      }, 10000);
+    }
   }
+  if (!app.app) await discoverLocal(false);
   renderStatus(true);
+}
+
+// Nach erfolgreicher Anmeldung beim integrierten Agenten: Spracherkennung über den Agenten, Ollama über die Durchleitung
+async function afterAgent(m) {
+  // WebView2 kann keine Web-Spracherkennung → lokale Erkennung über den Agenten (Windows System.Speech)
+  try {
+    const st = await m.agentClient.speechStatus();
+    voice.useAgent((wav, lang) => m.agentClient.speechRecognize(wav, lang), st);
+    status.stt = st;
+  } catch (e) { voice.useAgent(null, { available: false, reason: `Spracherkennung nicht prüfbar: ${e.message}` }); }
+  $$('[data-act="mic"]').forEach((b) => (b.title = voice.sttSupported ? 'Spracheingabe starten/stoppen' : voice.sttReason));
+  await discoverLocal(true);
+  renderStatus(true);
+}
+
+// Lokales Ollama erkennen: in der App über den Agenten, sonst nur wenn CC über localhost läuft
+async function discoverLocal(viaAgent) {
+  if (!viaAgent && !['localhost', '127.0.0.1'].includes(location.hostname)) return;
+  const { discoverOllama, makeExpert } = await import('./ai/providers.js');
+  try {
+    const names = await discoverOllama(store.get().settings.ollamaUrl);
+    const known = new Set(store.get().experts.map((e) => e.id));
+    const fresh = names.map((n) => makeExpert({ provider: 'ollama', vendorKey: 'ollama', model: n, label: `${n} · Ollama`, cost: 'free', local: true })).filter((e) => !known.has(e.id));
+    fresh.forEach((e) => actions.upsertExpert(e));
+    if (fresh.length) toast(`${fresh.length} lokale KI-Modelle automatisch verbunden`, 'ok');
+  } catch { /* Ollama läuft nicht – kein Problem */ }
 }
 if (!voice.sttSupported) $$('[data-act="mic"]').forEach((b) => (b.title = 'Spracheingabe in diesem Browser nicht verfügbar'));
 

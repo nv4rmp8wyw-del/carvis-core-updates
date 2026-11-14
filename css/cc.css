@@ -899,3 +899,15 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001s !important; animation-iteration-count: 1 !important; transition-duration: 0.001s !important; }
 }
+
+/* Design Center 4.0: wenige Grundeinstellungen, Rest unter „Erweitert“ */
+.design-basic { display: grid; gap: calc(14px * var(--d)); margin-bottom: calc(var(--s4) * var(--d)); }
+.design-row { display: grid; grid-template-columns: 140px 1fr; align-items: center; gap: 12px; }
+.design-label { font-weight: 600; font-size: calc(13.5px * var(--ts)); color: var(--text-2); }
+.design-row .swatches { margin: 0; }
+.design-adv > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.design-adv > summary::-webkit-details-marker { display: none; }
+.design-adv > summary small { font-weight: 400; }
+.design-adv[open] > summary { margin-bottom: calc(var(--s4) * var(--d)); }
+.design-adv-body { display: grid; gap: calc(var(--s5) * var(--d)); }
+@media (max-width: 860px) { .design-row { grid-template-columns: 1fr; gap: 6px; } }

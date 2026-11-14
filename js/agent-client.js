@@ -44,37 +44,45 @@ async function call(method, path, body, { auth = true, ms = 15000 } = {}) {
 // Im Browser (kein Tauri) passiert nichts – dort bleibt es bei der manuellen Verbindung.
 export const inApp = () => !!(window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke);
 
-export async function autoConnectApp(maxMs = 40000) {
+export async function autoConnectApp(maxMs = 60000) {
   if (!inApp()) return { app: false };
+  // Robust (4.0): Einzelne Fehlschläge beim Start (Tauri-Aufruf noch nicht bereit, Agent antwortet verzögert,
+  // Zeitüberschreitung) führen nicht mehr zum Abbruch – es wird bis maxMs erneut versucht.
+  // Endgültig abgebrochen wird nur bei einem gemeldeten Startfehler des Agenten oder falschem Token (401).
   const t0 = Date.now();
+  let lastErr = '';
+  agentState.attempts = 0;
   while (Date.now() - t0 < maxMs) {
-    let r;
-    try { r = await window.__TAURI__.core.invoke('agent_info'); } catch (e) { return { app: true, ok: false, error: String(e) }; }
-    if (r.error) { agentState.error = r.error; return { app: true, ok: false, error: r.error }; }
-    if (r.info) {
-      const i = JSON.parse(r.info);
+    agentState.attempts += 1;
+    let r = null;
+    try { r = await window.__TAURI__.core.invoke('agent_info'); } catch (e) { lastErr = `agent_info: ${e && e.message ? e.message : e}`; }
+    if (r && r.error) { agentState.error = r.error; return { app: true, ok: false, error: r.error }; }
+    if (r && r.info) {
       try {
-        await agentClient.connect(`http://127.0.0.1:${i.port}`, i.token);
+        const i = JSON.parse(r.info);
+        await agentClient.connect(`http://127.0.0.1:${i.port}`, i.token, { helloMs: 8000 });
         (await import('./ai/providers.js')).setOllamaGateway(`http://127.0.0.1:${i.port}`, i.token);
-        return { app: true, ok: true };
+        return { app: true, ok: true, attempts: agentState.attempts };
+      } catch (e) {
+        lastErr = e.message;
+        if (/Token falsch/.test(lastErr)) return { app: true, ok: false, error: lastErr };
       }
-      catch (e) { return { app: true, ok: false, error: e.message }; }
     }
-    await new Promise((res) => setTimeout(res, 400));
+    await new Promise((res) => setTimeout(res, Math.min(400 * agentState.attempts, 3000)));
   }
-  agentState.error = 'Der integrierte Agent ist nicht rechtzeitig bereit geworden.';
+  agentState.error = lastErr ? `Der integrierte Agent ist nicht erreichbar (${lastErr}).` : 'Der integrierte Agent ist nicht rechtzeitig bereit geworden.';
   return { app: true, ok: false, error: agentState.error };
 }
 
 export const agentClient = {
   state: agentState,
 
-  async connect(url, token) {
+  async connect(url, token, { helloMs = 4000 } = {}) {
     agentState.url = (url || DEFAULT_URL).trim();
     agentState.token = (token || '').trim();
     agentState.error = '';
     try {
-      const hello = await call('GET', '/hello', undefined, { auth: false, ms: 4000 });
+      const hello = await call('GET', '/hello', undefined, { auth: false, ms: helloMs });
       if (hello.agent !== 'ccc-desktop-agent') throw new Error('Unter dieser Adresse läuft kein CARVIS-Agent.');
       agentState.info = hello;
       agentState.perms = await call('GET', '/perms');
@@ -97,6 +105,10 @@ export const agentClient = {
 
   perf: () => call('GET', '/perf', undefined, { ms: 25000 }),
   system: () => call('GET', '/system', undefined, { ms: 20000 }),
+  hardware: () => call('GET', '/hardware', undefined, { ms: 15000 }),
+  webFetch: (url) => call('POST', '/web/fetch', { url }, { ms: 40000 }),
+  speechStatus: () => call('GET', '/speech/status', undefined, { ms: 45000 }),
+  speechRecognize: (wav, lang) => call('POST', '/speech/recognize', { wav, lang }, { ms: 130000 }),
   net: (targets) => call('POST', '/net', { targets }, { ms: 30000 }),
   list: (path = '') => call('GET', `/fs/list?path=${encodeURIComponent(path)}`),
   read: (path) => call('GET', `/fs/read?path=${encodeURIComponent(path)}`),

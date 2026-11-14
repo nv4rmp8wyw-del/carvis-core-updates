@@ -118,13 +118,20 @@ const trimSlash = (u) => String(u || '').replace(/\/+$/, '');
  * Ruft ein Expertenmodell auf. Einheitliches Ergebnis: { content, ms, model }.
  * @param settings  { ollamaUrl, proxyUrl }
  */
-export async function callExpert(ex, messages, settings, { timeout, signal } = {}) {
+export async function callExpert(ex, messages, settings, { timeout, signal, onToken } = {}) {
   // Lokale Modelle: großzügiges Limit, da das erste Laden in den Speicher Minuten dauern kann.
   // Ein Abbruch während des Ladens zwingt Ollama sonst, von vorn zu beginnen.
   timeout ??= ex.local ? 300000 : 120000;
   const t0 = performance.now();
+  activeExperts.add(ex.id);
+  try { return await callExpertInner(ex, messages, settings, { timeout, signal, t0, onToken }); } finally { activeExperts.delete(ex.id); }
+}
+
+async function callExpertInner(ex, messages, settings, { timeout, signal, t0, onToken }) {
   let content;
-  if (ex.provider === 'ollama') {
+  if (ex.provider === 'ollama' && onToken) {
+    content = await ollamaStream(ex, messages, settings, { timeout, signal, onToken });
+  } else if (ex.provider === 'ollama') {
     const r = ollamaRoute(settings.ollamaUrl);
     const d = await post(`${r.base}/api/chat`, { model: ex.model, messages, stream: false, keep_alive: '30m' }, timeout, signal, r.headers);
     content = d?.message?.content;
@@ -146,6 +153,68 @@ export async function callExpert(ex, messages, settings, { timeout, signal } = {
   content = String(content).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   return { content, ms: Math.round(performance.now() - t0), model: ex.model };
 }
+
+/** Ollama mit Streaming: liefert Teilantworten an onToken(textBisher). Zeitlimit gilt bis zum ersten Zeichen
+ *  (Modell laden kann dauern) und danach als Ruhezeit zwischen zwei Stücken. Abbruch über signal. */
+async function ollamaStream(ex, messages, settings, { timeout, signal, onToken }) {
+  const r = ollamaRoute(settings.ollamaUrl);
+  const ctrl = new AbortController();
+  const abort = () => ctrl.abort();
+  signal?.addEventListener('abort', abort);
+  let timer = setTimeout(abort, timeout);
+  const idle = () => { clearTimeout(timer); timer = setTimeout(abort, Math.min(timeout, 120000)); };
+  let text = '';
+  try {
+    const res = await fetch(`${r.base}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...r.headers }, body: JSON.stringify({ model: ex.model, messages, stream: true, keep_alive: '30m' }), signal: ctrl.signal });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      idle();
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (!line) continue;
+        const d = JSON.parse(line);
+        if (d.error) throw new Error(d.error);
+        const piece = d.message?.content || '';
+        if (piece) { text += piece; onToken(text.replace(/<think>[\s\S]*?(<\/think>|$)/gi, '')); }
+      }
+    }
+    return text;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(signal?.aborted ? 'abgebrochen' : 'Zeitüberschreitung');
+    if (e instanceof TypeError) throw new Error('keine Verbindung / CORS');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
+/** Direkter Zugriff auf die Ollama-API (über den Agenten in der Windows-App, sonst die eingestellte Adresse). */
+export async function ollamaRequest(url, path, { method = 'GET', body, signal, timeout = 10000 } = {}) {
+  const r = ollamaRoute(url);
+  const ctrl = new AbortController();
+  const timer = timeout ? setTimeout(() => ctrl.abort(), timeout) : null;
+  signal?.addEventListener('abort', () => ctrl.abort());
+  try {
+    const res = await fetch(`${r.base}${path}`, { method, headers: { 'Content-Type': 'application/json', ...r.headers }, body: body === undefined ? undefined : JSON.stringify(body), signal: ctrl.signal });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
+    return res;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(signal?.aborted ? 'abgebrochen' : 'Zeitüberschreitung');
+    if (e instanceof TypeError) throw new Error('keine Verbindung / CORS');
+    throw e;
+  } finally { if (timer) clearTimeout(timer); }
+}
+
+/** Modelle, die gerade eine Anfrage bearbeiten („aktiv“). */
+export const activeExperts = new Set();
 
 /** Listet lokal installierte Ollama-Modelle. */
 export async function discoverOllama(url) {

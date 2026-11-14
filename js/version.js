@@ -1,4 +1,4 @@
-export const VERSION = '3.8.1';
+export const VERSION = '4.0.0';
 export const PRODUCT = 'CARVIS CORE';
 export const REPO = 'nv4rmp8wyw-del/carvis-core-c';
 // Nur geprüfte Installationsdateien öffentlich; dieser Quellcode bleibt privat.

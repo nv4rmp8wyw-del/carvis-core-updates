@@ -207,7 +207,7 @@ export function renderMessage(m, { compact = false } = {}) {
   </div>`;
 }
 
-export function thinkingBubble(stage = '') {
-  return `<div class="msg msg-ai msg-thinking"><div class="msg-head"><span class="avatar"></span><b>CARVIS</b><span class="src src-sys">verarbeitet …</span></div>
-    <div class="bubble"><span class="dots"><i></i><i></i><i></i></span>${stage ? `<span class="stage">${esc(stage)}</span>` : ''}</div></div>`;
+export function thinkingBubble(stage = '', partial = '') {
+  return `<div class="msg msg-ai msg-thinking"><div class="msg-head"><span class="avatar"></span><b>CARVIS</b><span class="src src-sys">${partial ? 'antwortet …' : 'verarbeitet …'}</span><button class="link-btn" data-act="stop-answer" title="Antwort abbrechen">■ Stopp</button></div>
+    <div class="bubble"><div class="stream">${partial ? md(partial) : ''}</div>${partial ? '' : '<span class="dots"><i></i><i></i><i></i></span>'}${stage && !partial ? `<span class="stage">${esc(stage)}</span>` : ''}</div></div>`;
 }

@@ -2,10 +2,22 @@ import { VERSION } from '../version.js';
 import { esc } from '../util.js';
 import { icon, confirmDialog, toast } from '../ui.js';
 import { store } from '../store.js';
-import { AGENTS, STATUS, WORKFLOWS, run, runWorkflow, requestStop } from '../agents.js';
+import { AGENTS, STATUS, WORKFLOWS, run, requestStop, enqueue, cancelTask, queue, agentStatus, MAX_QUEUE, STEP_TIMEOUT_MS } from '../agents.js';
+import { relTime } from '../util.js';
 import { agentClient } from '../agent-client.js';
 
-const ST_LED = { fertig: 'ok', läuft: 'warn', fehler: 'danger', gestoppt: 'danger', abgelehnt: 'danger', wartet: 'idle' };
+const ST_LED = { fertig: 'ok', läuft: 'warn', 'wartet auf Genehmigung': 'warn', fehler: 'danger', gestoppt: 'danger', abgelehnt: 'danger', wartet: 'idle' };
+
+function queuePanel(s) {
+  const hist = [...(s.agentTasks || [])].reverse().slice(0, 6);
+  if (!queue.waiting.length && !hist.length) return '';
+  return `<section class="card glass" style="margin-bottom:18px" data-queue>
+    <header class="card-head"><h2>${icon('task')} Aufgabenwarteschlange</h2><span class="muted small">${queue.current ? '1 läuft' : 'frei'} · ${queue.waiting.length}/${MAX_QUEUE} wartend</span></header>
+    <ul class="status-list">${queue.waiting.map((t, i) => `<li data-task="${t.id}"><span class="led led-idle"></span><span class="k">${i + 1}. ${esc(t.wf.name)}</span><span class="v">wartet <button class="link-btn" data-act="task-cancel" data-id="${t.id}">entfernen</button></span></li>`).join('')}
+      ${hist.map((h) => `<li><span class="led led-${h.status === 'fertig' ? 'ok' : 'danger'}"></span><span class="k">${esc(h.name)}</span><span class="v">${esc(h.status)}<small>${relTime(h.ts)}${h.error ? ' · ' + esc(h.error) : ''}</small></span></li>`).join('')}</ul>
+    <p class="muted small">Es läuft immer nur ein Ablauf; jeder Schritt hat ein Zeitlimit von ${STEP_TIMEOUT_MS / 1000} s (Bestätigungen ausgenommen). Der Not-Stopp beendet den laufenden Ablauf und leert die Warteschlange.</p>
+  </section>`;
+}
 
 function runPanel() {
   const r = run.current;
@@ -26,12 +38,14 @@ export default {
     const docs = s.documents;
     return `<div class="page">
       <header class="page-head"><div><p class="eyebrow">Agenten</p><h1>Agenten &amp; Abläufe</h1>
-        <p class="muted">Neun Agenten mit ehrlichem Status. Abläufe zeigen jeden Schritt, fragen vor Änderungen nach und lassen sich mit dem Not-Stopp beenden. Der Stopp wirkt zwischen den Schritten, ein bereits laufender Schritt wird nicht abgebrochen.</p></div></header>
+        <p class="muted">Ein gemeinsames Agentenregister mit ehrlichem Status (Bereit · Arbeitet · Wartet auf Genehmigung · Fehler · braucht Voraussetzung · Geplant). Abläufe laufen über eine zentrale Warteschlange, zeigen jeden Schritt, fragen vor Änderungen nach und lassen sich mit dem Not-Stopp beenden.</p></div>
+        ${run.current && !run.current.finished ? '<button class="btn btn-danger" data-act="wf-stop">■ Not-Stopp</button>' : ''}</header>
       ${runPanel()}
+      ${queuePanel(s)}
       <div class="grid">
         ${AGENTS.map((a) => {
-          const st = STATUS[a.status(s)];
-          return `<section class="card glass"><header class="card-head"><h2>${icon(a.icon)} ${esc(a.name)}</h2><span class="tag ${st.cls}">${st.label}</span></header>
+          const st = STATUS[agentStatus(a, s)];
+          return `<section class="card glass" data-agent="${a.id}"><header class="card-head"><h2>${icon(a.icon)} ${esc(a.name)}</h2><span class="tag ${st.cls}">${st.label}</span></header>
             <p class="muted small">${esc(a.desc)}</p>${a.go ? `<button class="link-btn" data-go="${a.go}">Öffnen ›</button>` : ''}</section>`;
         }).join('')}
       </div>
@@ -52,16 +66,21 @@ export default {
     </div>`;
   },
   async onAct(act, el, ctx) {
-    if (act === 'wf-stop') { requestStop(); toast('Not-Stopp ausgelöst.', 'info'); return; }
+    if (act === 'wf-stop') { requestStop(); toast('Not-Stopp ausgelöst. Warteschlange geleert.', 'info'); ctx.rerender(); return; }
+    if (act === 'task-cancel') { cancelTask(el.dataset.id); ctx.rerender(); return; }
     if (act !== 'wf-run') return;
     const wf = WORKFLOWS.find((w) => w.id === el.dataset.id);
-    if (!wf || (run.current && !run.current.finished)) return;
+    if (!wf) return;
     const params = {};
     el.closest('.wf').querySelectorAll('[name]').forEach((i) => (params[i.name] = i.value.trim()));
     if ((wf.params || []).some((p) => !params[p.name])) { toast('Bitte alle Felder ausfüllen.', 'info'); return; }
-    await runWorkflow(wf, params, {
-      update: () => ctx.rerender(),
-      confirm: (text) => confirmDialog(text, { title: 'Aktion bestätigen', ok: 'Ausführen', danger: false }),
-    });
+    const busy = run.current && !run.current.finished;
+    try {
+      enqueue(wf, params, {
+        update: () => ctx.rerender(),
+        confirm: (text) => confirmDialog(text, { title: 'Aktion bestätigen', ok: 'Ausführen', danger: false }),
+      });
+      if (busy) toast(`In der Warteschlange: ${wf.name} (Position ${queue.waiting.length})`, 'info');
+    } catch (e) { toast(e.message, 'danger'); }
   },
 };

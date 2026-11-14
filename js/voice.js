@@ -5,10 +5,11 @@
 // - Mikrofonpegel: getUserMedia + AnalyserNode (nur Desktop; auf iOS deaktiviert, weil es dort mit
 //   der Spracherkennung kollidieren kann).
 import { isIOS } from './util.js';
+import { startRecording, toBase64 } from './voice-recorder.js';
 
 // Windows-App (Tauri/WebView2): Die Browser-Spracherkennung ist dort nicht verfügbar bzw. scheitert.
 const IN_APP = !!(window.__TAURI__ && window.__TAURI__.core);
-const APP_STT = 'Spracheingabe ist in der Windows-App noch nicht verfügbar (WebView2 bietet keine Spracherkennung). Öffne CARVIS CORE im Browser (Edge oder Chrome) oder tippe deine Frage. Sprachausgabe funktioniert.';
+const APP_STT = 'Die Spracherkennung des Browsers steht in der Windows-App nicht zur Verfügung (WebView2), und die lokale Erkennung über den Agenten ist gerade nicht bereit. Tippe deine Frage oder starte den Agenten neu. Sprachausgabe funktioniert.';
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -23,7 +24,17 @@ const ERRORS = {
 };
 
 export const voice = {
-  sttSupported: !!SR,
+  // Spracherkennung: 'web' (Web Speech API im Browser) oder 'agent' (Windows-App: Aufnahme hier, Erkennung lokal
+  // im Agenten mit Windows-System.Speech). WebView2 unterstützt die Web Speech API nicht.
+  sttEngine: SR ? 'web' : null,
+  sttReason: SR ? '' : 'Spracherkennung wird von diesem Browser nicht unterstützt.',
+  agentRecognize: null,
+  get sttSupported() { return !!this.sttEngine; },
+  /** Windows-App: lokale Erkennung über den Agenten einschalten (recognize(base64Wav, lang) -> {text}). */
+  useAgent(recognize, { available, reason } = {}) {
+    if (available) { this.sttEngine = 'agent'; this.agentRecognize = recognize; this.sttReason = ''; }
+    else { this.sttEngine = null; this.sttReason = reason || 'Lokale Spracherkennung nicht verfügbar.'; }
+  },
   ttsSupported: 'speechSynthesis' in window,
   wakeSupported: !!SR && !isIOS(),
   listening: false,
@@ -48,8 +59,39 @@ export const voice = {
     try { return (await navigator.permissions.query({ name: 'microphone' })).state; } catch { return 'unknown'; }
   },
 
-  async listen({ lang = 'de-DE', onStart, onInterim, onFinal, onEnd, onError, onLevel } = {}) {
-    if (!SR) { onError?.(IN_APP ? APP_STT : 'Spracherkennung wird von diesem Browser nicht unterstützt (z. B. Firefox). Nutze Chrome, Edge oder Safari.', 'unsupported'); onEnd?.('', true); return; }
+  listen(opts = {}) {
+    if (this.sttEngine === 'agent') return this.listenAgent(opts);
+    return this.listenWeb(opts);
+  },
+
+  /** Windows-App: aufnehmen (Pegel, Auto-Stopp bei Pause), lokal im Agenten erkennen. */
+  listenAgent({ lang = 'de-DE', onStart, onInterim, onFinal, onEnd, onError, onLevel } = {}) {
+    if (this.listening) return;
+    this.cancelSpeak();
+    this.listening = true;
+    const rec = startRecording({ onLevel, onSpeech: () => onInterim?.('Ich höre zu …') });
+    this.rec = { stop: rec.stop, abort: rec.cancel };
+    onStart?.();
+    let text = '', errored = false;
+    rec.done
+      .then(async (wav) => {
+        if (!wav) { errored = true; onError?.('Ich habe nichts gehört.', 'no-speech'); return; }
+        onInterim?.('Erkenne Sprache …');
+        const r = await this.agentRecognize(toBase64(wav), lang);
+        text = (r?.text || '').trim();
+        if (!text) { errored = true; onError?.('Ich habe nichts verstanden.', 'no-match'); }
+      })
+      .catch((e) => { errored = true; onError?.(e.message, e.code || 'agent'); })
+      .finally(() => {
+        this.listening = false;
+        this.rec = null;
+        onEnd?.(text, errored);
+        if (text) onFinal?.(text);
+      });
+  },
+
+  async listenWeb({ lang = 'de-DE', onStart, onInterim, onFinal, onEnd, onError, onLevel } = {}) {
+    if (!SR) { onError?.(IN_APP ? (this.sttReason || APP_STT) : (this.sttReason || 'Spracherkennung wird von diesem Browser nicht unterstützt (z. B. Firefox). Nutze Chrome, Edge oder Safari.'), 'unsupported'); onEnd?.('', true); return; }
     if (this.listening) return;
     if ((await this.micPermission()) === 'denied') {
       onError?.('Das Mikrofon ist für diese Seite gesperrt. Klicke links in der Adressleiste auf das Schloss-Symbol → Mikrofon → Zulassen, dann erneut versuchen.', 'not-allowed');
@@ -99,6 +141,8 @@ export const voice = {
   },
 
   stop() { try { this.rec?.stop(); } catch { /* ignorieren */ } },
+  /** Aufnahme verwerfen (Escape): nichts wird erkannt oder gesendet. */
+  abort() { try { (this.rec?.abort || this.rec?.stop)?.call(this.rec); } catch { /* ignorieren */ } },
 
   async startLevel(onLevel) {
     try {

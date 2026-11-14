@@ -22,6 +22,7 @@ const SLIDERS = [
 const MODES = [['dark', 'Dunkel'], ['light', 'Hell'], ['system', 'System'], ['custom', 'Eigen']];
 const LOOKS = [['glass', 'Glas'], ['standard', 'Standard'], ['compact', 'Kompakt']];
 const DENSITY = [[0.8, 'Kompakt'], [1, 'Normal'], [1.2, 'Großzügig']];
+let advOpen = false;
 const CORE = [['full', 'Voll'], ['calm', 'Ruhig'], ['minimal', 'Minimal'], ['off', 'Aus']];
 
 function orderOf(t) {
@@ -42,62 +43,61 @@ export default {
     const cr = measureContrast();
     const ord = orderOf(t);
     const label = (id) => DASH_PARTS.find(([x]) => x === id)?.[1] || id;
+    const basicModes = MODES.filter(([k]) => k !== 'custom');
+    const weak = cr.filter(([, r]) => r < 4.5);
     return `<div class="page design-page"><header class="page-head"><div><h1>Design</h1>
-      <p class="muted">Jede Änderung wirkt sofort in der ganzen App und bleibt gespeichert.</p></div>
-      <div class="row-actions">
-        <button class="btn btn-sm" data-act="design-export">${icon('share')} Exportieren</button>
-        <label class="btn btn-sm" title="Design aus einer exportierten Datei laden">${icon('update')} Importieren<input type="file" accept="application/json,.json" data-design-import hidden></label>
-        <button class="btn btn-sm btn-ghost" data-act="theme-reset">${icon('reset')} Zurücksetzen</button>
-      </div></header>
+      <p class="muted">Änderungen wirken sofort in der ganzen App und bleiben gespeichert.</p></div>
+      <div class="row-actions"><button class="btn btn-sm btn-ghost" data-act="theme-reset">${icon('reset')} Zurücksetzen</button></div></header>
 
-      <section class="card" aria-label="Designprofile"><header class="card-head"><h2>${icon('columns')} Profile</h2><button class="btn btn-sm" data-act="profile-save">${icon('plus')} Aktuelles speichern</button></header>
-        <div class="profiles">${PROFILES.map((p) => `<button class="profile ${t.profile === p.id ? 'on' : ''}" data-act="theme-profile" data-id="${p.id}" aria-pressed="${t.profile === p.id}"><span class="profile-sw" data-p="${p.id}"></span><b>${esc(p.label)}</b><small>${esc(p.note)}</small></button>`).join('')}
-          ${own.map((p) => `<div class="profile own ${t.profile === p.id ? 'on' : ''}"><button class="profile-hit" data-act="theme-own" data-id="${esc(p.id)}" aria-pressed="${t.profile === p.id}"><span class="profile-sw" style="--a:${esc(p.t.accent)}"></span><b>${esc(p.name)}</b><small>eigenes Profil</small></button><button class="icon-btn sm ghost" data-act="profile-del" data-id="${esc(p.id)}" aria-label="Profil ${esc(p.name)} löschen" title="Löschen">${icon('trash')}</button></div>`).join('')}</div>
+      <section class="card design-basic" aria-label="Grunddesign">
+        <div class="design-row"><span class="design-label">Modus</span>
+          <div class="seg" role="group" aria-label="Farbmodus">${basicModes.map(([k, l]) => `<button class="${t.mode === k ? 'on' : ''}" data-act="theme-mode" data-id="${k}" aria-pressed="${t.mode === k}">${l}</button>`).join('')}${t.mode === 'custom' ? '<button class="on" aria-pressed="true" data-act="theme-mode" data-id="custom">Eigen</button>' : ''}</div></div>
+        <div class="design-row"><span class="design-label">Akzentfarbe</span>
+          <div class="swatches" role="group" aria-label="Akzentfarbe">${PRESETS.map((p) => `<button class="swatch" style="background:${p.color}" data-act="theme-preset" data-id="${p.id}" aria-pressed="${t.preset === p.id}" aria-label="${esc(p.label)}" title="${esc(p.label)}"></button>`).join('')}
+            <label class="swatch-custom" title="Eigene Farbe" aria-label="Eigene Akzentfarbe"><input type="color" data-theme-key="accent" value="${esc(t.accent)}"></label></div></div>
+        <div class="design-row"><span class="design-label">Glasdarstellung</span>
+          <div class="seg" role="group" aria-label="Erscheinungsbild">${LOOKS.map(([k, l]) => `<button class="${t.look === k ? 'on' : ''}" data-act="theme-look" data-id="${k}" aria-pressed="${t.look === k}">${l}</button>`).join('')}</div></div>
+        <div class="design-row"><span class="design-label">Animationen</span>
+          <div class="seg" role="group" aria-label="Animationen"><button class="${s.settings.reduceMotion ? '' : 'on'}" data-act="motion" data-v="0" aria-pressed="${!s.settings.reduceMotion}">Normal</button><button class="${s.settings.reduceMotion ? 'on' : ''}" data-act="motion" data-v="1" aria-pressed="${!!s.settings.reduceMotion}">Reduziert</button></div></div>
+        ${weak.length ? `<div class="notice notice-warn">Lesbarkeit: ${weak.map(([k, r]) => `${esc(k)} ${r.toFixed(1)} : 1`).join(' · ')} (unter 4,5 : 1). <button class="link-btn" data-act="contrast-fix">Automatisch korrigieren</button></div>` : ''}
       </section>
 
-      <div class="grid design-grid">
-        <section class="card"><header class="card-head"><h2>${icon('preview')} Modus</h2></header>
-          <div class="seg" role="group" aria-label="Farbmodus">${MODES.map(([k, l]) => `<button class="${t.mode === k ? 'on' : ''}" data-act="theme-mode" data-id="${k}" aria-pressed="${t.mode === k}">${l}</button>`).join('')}</div>
-          <p class="muted small">${t.mode === 'system' ? 'Folgt automatisch dem Hell-/Dunkel-Design von Windows.' : t.mode === 'custom' ? 'Eigene Hintergrund- und Flächenfarbe; Textfarbe passt sich der Helligkeit an.' : 'Fester Modus.'}</p>
-          <div class="field" style="margin-top:14px">Erscheinungsbild<div class="seg" role="group" aria-label="Erscheinungsbild">${LOOKS.map(([k, l]) => `<button class="${t.look === k ? 'on' : ''}" data-act="theme-look" data-id="${k}" aria-pressed="${t.look === k}">${l}</button>`).join('')}</div></div>
-          ${t.mode === 'custom' ? `<div class="two"><label class="field">Hintergrund<input type="color" data-theme-key="bg" value="${esc(t.bg || '#0b0b0c')}"></label><label class="field">Flächen<input type="color" data-theme-key="surface" value="${esc(t.surface || '#151516')}"></label></div>` : ''}
-        </section>
-
-        <section class="card span-2"><header class="card-head"><h2>${icon('core')} Akzentfarbe</h2></header>
-          <div class="swatches" role="group" aria-label="Akzentfarbe">${PRESETS.map((p) => `<button class="swatch" style="background:${p.color}" data-act="theme-preset" data-id="${p.id}" aria-pressed="${t.preset === p.id}" aria-label="${esc(p.label)}" title="${esc(p.label)}"></button>`).join('')}
-            <label class="swatch-custom" title="Eigene Farbe" aria-label="Eigene Akzentfarbe"><input type="color" data-theme-key="accent" value="${esc(t.accent)}"></label></div>
-          <p class="muted small">Aktuell: <b>${esc(PRESETS.find((p) => p.id === t.preset)?.label || 'Eigene Farbe')}</b> (${esc(t.accent)}).</p>
-        </section>
-
-        <section class="card span-2"><header class="card-head"><h2>${icon('settings')} Feinabstimmung</h2></header>
-          <div class="two">${SLIDERS.map((x) => slider(t, x)).join('')}</div>
-          <div class="field">Dichte<div class="seg" role="group" aria-label="Dichte">${DENSITY.map(([v, l]) => `<button class="${Math.abs(t.density - v) < 0.01 ? 'on' : ''}" data-act="theme-density" data-v="${v}">${l}</button>`).join('')}</div></div>
-          <label class="switch"><input type="checkbox" data-reduce-motion ${s.settings.reduceMotion ? 'checked' : ''}><span></span> Animationen reduzieren</label>
-        </section>
-
-        <section class="card"><header class="card-head"><h2>${icon('review')} Lesbarkeit</h2></header>
-          <ul class="status-list">${cr.map(([k, r]) => `<li><span class="led led-${r >= 4.5 ? 'ok' : r >= 3 ? 'warn' : 'danger'}"></span><span class="k">${k}</span><span class="v">${r.toFixed(1)} : 1<small>${contrastLabel(r)}</small></span></li>`).join('')}</ul>
-          ${cr.some(([, r]) => r < 4.5) ? `<div class="notice notice-warn">Einige Kombinationen sind schwer lesbar (unter 4,5 : 1). <button class="link-btn" data-act="contrast-fix">Automatisch korrigieren</button></div>` : '<p class="muted small">Alle Werte erfüllen WCAG AA (mind. 4,5 : 1).</p>'}
-        </section>
-
-        <section class="card"><header class="card-head"><h2>${icon('core')} CARVIS-Kern</h2></header>
-          <div class="seg" role="group" aria-label="Darstellung des CARVIS-Kerns">${CORE.map(([k, l]) => `<button class="${t.coreView === k ? 'on' : ''}" data-act="theme-core" data-id="${k}">${l}</button>`).join('')}</div>
-          <p class="muted small">„Minimal“ und „Aus“ halten die Animation vollständig an (weniger GPU-Last).</p>
-        </section>
-
-        <section class="card"><header class="card-head"><h2>${icon('dashboard')} Dashboard</h2></header>
-          <ul class="dash-order">${ord.map((id, i) => `<li><label class="switch"><input type="checkbox" data-dash-part="${id}" ${t.hidden.includes(id) ? '' : 'checked'}><span></span> ${esc(label(id))}</label>
-            <span class="row-actions"><button class="icon-btn sm ghost" data-act="dash-up" data-id="${id}" ${i === 0 ? 'disabled' : ''} aria-label="${esc(label(id))} nach oben">▲</button><button class="icon-btn sm ghost" data-act="dash-down" data-id="${id}" ${i === ord.length - 1 ? 'disabled' : ''} aria-label="${esc(label(id))} nach unten">▼</button></span></li>`).join('')}</ul>
-        </section>
-
-        <section class="card design-preview" aria-label="Vorschau"><header class="card-head"><h2>${icon('preview')} Vorschau</h2><span class="tag tag-ok">live</span></header>
-          <p>Überschrift, <b>Fließtext</b> und <span class="muted">Nebentext</span> in der aktuellen Einstellung.</p>
-          <div class="row-actions"><button class="btn btn-primary btn-sm" type="button" tabindex="-1">Primär</button><button class="btn btn-sm" type="button" tabindex="-1">Sekundär</button><span class="chip">Chip</span><span class="tag tag-warn">Hinweis</span></div>
-          <div class="progress" style="--w:62%;margin-top:12px"><span></span></div>
-        </section>
-      </div></div>`;
+      <details class="card design-adv" data-adv-design ${advOpen ? 'open' : ''}><summary>${icon('settings')} Erweitert <small class="muted">Profile, eigene Farben, Feinabstimmung, CARVIS-Kern, Dashboard, Export</small></summary>
+        <div class="design-adv-body">
+          <section aria-label="Designprofile"><header class="card-head"><h2>${icon('columns')} Profile</h2><button class="btn btn-sm" data-act="profile-save">${icon('plus')} Aktuelles speichern</button></header>
+            <div class="profiles">${PROFILES.map((p) => `<button class="profile ${t.profile === p.id ? 'on' : ''}" data-act="theme-profile" data-id="${p.id}" aria-pressed="${t.profile === p.id}"><span class="profile-sw" data-p="${p.id}"></span><b>${esc(p.label)}</b><small>${esc(p.note)}</small></button>`).join('')}
+              ${own.map((p) => `<div class="profile own ${t.profile === p.id ? 'on' : ''}"><button class="profile-hit" data-act="theme-own" data-id="${esc(p.id)}" aria-pressed="${t.profile === p.id}"><span class="profile-sw" style="--a:${esc(p.t.accent)}"></span><b>${esc(p.name)}</b><small>eigenes Profil</small></button><button class="icon-btn sm ghost" data-act="profile-del" data-id="${esc(p.id)}" aria-label="Profil ${esc(p.name)} löschen" title="Löschen">${icon('trash')}</button></div>`).join('')}</div>
+          </section>
+          <div class="grid design-grid">
+            <section><header class="card-head"><h2>${icon('preview')} Eigene Farben</h2></header>
+              <button class="btn btn-sm ${t.mode === 'custom' ? 'btn-primary' : ''}" data-act="theme-mode" data-id="custom">Eigene Hintergrundfarbe verwenden</button>
+              ${t.mode === 'custom' ? `<div class="two"><label class="field">Hintergrund<input type="color" data-theme-key="bg" value="${esc(t.bg || '#0b0b0c')}"></label><label class="field">Flächen<input type="color" data-theme-key="surface" value="${esc(t.surface || '#151516')}"></label></div>` : '<p class="muted small">Textfarben passen sich automatisch der Helligkeit an.</p>'}
+            </section>
+            <section class="span-2"><header class="card-head"><h2>${icon('settings')} Feinabstimmung</h2></header>
+              <div class="two">${SLIDERS.map((x) => slider(t, x)).join('')}</div>
+              <div class="field">Dichte<div class="seg" role="group" aria-label="Dichte">${DENSITY.map(([v, l]) => `<button class="${Math.abs(t.density - v) < 0.01 ? 'on' : ''}" data-act="theme-density" data-v="${v}">${l}</button>`).join('')}</div></div>
+            </section>
+            <section><header class="card-head"><h2>${icon('review')} Lesbarkeit</h2></header>
+              <ul class="status-list">${cr.map(([k, r]) => `<li><span class="led led-${r >= 4.5 ? 'ok' : r >= 3 ? 'warn' : 'danger'}"></span><span class="k">${k}</span><span class="v">${r.toFixed(1)} : 1<small>${contrastLabel(r)}</small></span></li>`).join('')}</ul>
+            </section>
+            <section><header class="card-head"><h2>${icon('core')} CARVIS-Kern</h2></header>
+              <div class="seg" role="group" aria-label="Darstellung des CARVIS-Kerns">${CORE.map(([k, l]) => `<button class="${t.coreView === k ? 'on' : ''}" data-act="theme-core" data-id="${k}">${l}</button>`).join('')}</div>
+              <p class="muted small">„Minimal“ und „Aus“ halten die Animation an (weniger GPU-Last).</p>
+            </section>
+            <section><header class="card-head"><h2>${icon('dashboard')} Dashboard</h2></header>
+              <ul class="dash-order">${ord.map((id, i) => `<li><label class="switch"><input type="checkbox" data-dash-part="${id}" ${t.hidden.includes(id) ? '' : 'checked'}><span></span> ${esc(label(id))}</label>
+                <span class="row-actions"><button class="icon-btn sm ghost" data-act="dash-up" data-id="${id}" ${i === 0 ? 'disabled' : ''} aria-label="${esc(label(id))} nach oben">▲</button><button class="icon-btn sm ghost" data-act="dash-down" data-id="${id}" ${i === ord.length - 1 ? 'disabled' : ''} aria-label="${esc(label(id))} nach unten">▼</button></span></li>`).join('')}</ul>
+            </section>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm" data-act="design-export">${icon('share')} Exportieren</button>
+            <label class="btn btn-sm" title="Design aus einer exportierten Datei laden">${icon('update')} Importieren<input type="file" accept="application/json,.json" data-design-import hidden></label>
+          </div>
+        </div>
+      </details></div>`;
   },
   onMount(root, ctx) {
+    root.querySelector('[data-adv-design]')?.addEventListener('toggle', (e) => { advOpen = e.target.open; });
     // Live-Vorschau beim Ziehen/Farbwählen: nur anwenden, noch nicht speichern
     root.querySelector('.design-page')?.addEventListener('input', (e) => {
       const el = e.target;
@@ -115,6 +115,7 @@ export default {
     const id = el.dataset.id;
     if (act === 'theme-preset') { const p = PRESETS.find((x) => x.id === id); save({ preset: p.id, accent: p.color, profile: 'custom' }, ctx); }
     if (act === 'theme-look') return save({ look: id }, ctx);
+    if (act === 'motion') { actions.setSettings({ reduceMotion: el.dataset.v === '1' }); ctx.applySettings(); return ctx.rerender(); }
     if (act === 'theme-mode') save({ mode: id, profile: 'custom', ...(id === 'custom' && !t.bg ? { bg: '#0b0b0c' } : {}) }, ctx);
     if (act === 'theme-profile') { const p = PROFILES.find((x) => x.id === id); save({ ...p.t, profile: p.id }, ctx); toast(`Design „${p.label}“ aktiv`, 'ok', 1400); }
     if (act === 'theme-own') { const p = (store.get().settings.designProfiles || []).find((x) => x.id === id); if (p) { actions.setSettings({ theme: normalizeTheme({ ...p.t, profile: p.id }) }); ctx.applySettings(); } }

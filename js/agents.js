@@ -6,7 +6,10 @@ import { wikiSearch } from './ai/research.js';
 import { aiOverview } from './views/models.js';
 
 export const STATUS = {
-  aktiv: { label: 'AKTIV', cls: 'tag-ok' },
+  aktiv: { label: 'BEREIT', cls: 'tag-ok' },
+  arbeitet: { label: 'ARBEITET', cls: 'tag-warn' },
+  genehmigung: { label: 'WARTET AUF GENEHMIGUNG', cls: 'tag-warn' },
+  fehler: { label: 'FEHLER', cls: 'tag-danger' },
   modell: { label: 'BRAUCHT KI-MODELL', cls: 'tag-warn' },
   agent: { label: 'BRAUCHT DESKTOP-AGENT', cls: 'tag-warn' },
   geplant: { label: 'GEPLANT', cls: 'tag-plan' },
@@ -66,6 +69,8 @@ export const run = { current: null, stop: false };
 
 export function requestStop() {
   run.stop = true;
+  // Not-Stopp leert auch die Warteschlange: nach dem Stopp startet nichts automatisch weiter.
+  queue.waiting.splice(0).forEach((t) => { t.status = 'abgebrochen'; });
   if (agentClient.connected) agentClient.stop().catch(() => {});
 }
 
@@ -158,11 +163,73 @@ export const WORKFLOWS = [
   },
 ];
 
+// ---------- Zentrale Aufgabenwarteschlange (4.0) ----------
+// Genau EIN Ablauf läuft gleichzeitig (keine parallelen Agentenprozesse), weitere warten in der Schlange.
+// Jeder Schritt hat ein Zeitlimit; Bestätigungsschritte warten auf den Nutzer ohne Zeitlimit.
+// Ehrlich: Ein Schritt im Browser lässt sich nach Zeitüberschreitung nicht hart abbrechen – sein Ergebnis wird verworfen
+// und der Ablauf gilt als fehlgeschlagen. Aktionen des Desktop-Agenten stoppt der Not-Stopp im Agenten selbst.
+export const STEP_TIMEOUT_MS = 60000;
+export const MAX_QUEUE = 8;
+export const queue = { waiting: [], current: null };
+let pumping = false;
+
+/** Status eines Agenten gemäß Register: laufende Aufgabe hat Vorrang vor der Grundverfügbarkeit. */
+export function agentStatus(a, s = store.get()) {
+  const cur = run.current && !run.current.finished ? run.current : null;
+  const step = cur?.steps.find((x) => x.status === 'läuft' || x.status === 'wartet auf Genehmigung');
+  if (step && step.agent === a.id) return step.status === 'läuft' ? 'arbeitet' : 'genehmigung';
+  const last = (s.agentTasks || []).at(-1);
+  if (last && Date.now() - last.ts < 60000 && last.steps?.some((x) => x.agent === a.id && x.status === 'fehler')) return 'fehler';
+  return a.status(s);
+}
+
+function remember(r, status) {
+  store.update((s) => {
+    s.agentTasks = [...(s.agentTasks || []), { id: r.id, name: r.wf.name, status, error: r.error, ts: Date.now(), steps: r.steps.map(({ agent, title, status: st, msg }) => ({ agent, title, status: st, msg })) }].slice(-20);
+  });
+}
+
+/** Ablauf einreihen. Gibt die Aufgabe zurück; startet die Abarbeitung, falls nichts läuft. */
+export function enqueue(wf, params, hooks) {
+  if (queue.waiting.length >= MAX_QUEUE) throw new Error(`Warteschlange voll (höchstens ${MAX_QUEUE} Aufgaben).`);
+  const task = { id: Math.random().toString(36).slice(2, 9), wf, params, hooks, status: 'wartet', created: Date.now() };
+  queue.waiting.push(task);
+  hooks.update?.();
+  pump();
+  return task;
+}
+
+/** Wartende Aufgabe entfernen oder laufende per Not-Stopp beenden. */
+export function cancelTask(id) {
+  const i = queue.waiting.findIndex((t) => t.id === id);
+  if (i >= 0) { const [t] = queue.waiting.splice(i, 1); t.status = 'abgebrochen'; logAct(`Aufgabe aus der Warteschlange entfernt: ${t.wf.name}`, 'trash'); t.hooks.update?.(); return true; }
+  if (queue.current?.id === id) { requestStop(); return true; }
+  return false;
+}
+
+async function pump() {
+  if (pumping) return;
+  pumping = true;
+  try {
+    while (queue.waiting.length) {
+      const t = queue.waiting.shift();
+      queue.current = t;
+      t.status = 'läuft';
+      try { t.result = await runWorkflow(t.wf, t.params, t.hooks, t.id); } catch (e) { t.error = e.message; }
+      t.status = 'fertig';
+      queue.current = null;
+      t.hooks.update?.();
+    }
+  } finally { pumping = false; }
+}
+
+const withTimeout = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`Zeitüberschreitung nach ${Math.round(ms / 1000)} s (${what})`)), ms))]);
+
 /** Führt einen Ablauf aus. hooks: { update(), confirm(text) -> Promise<boolean> } */
-export async function runWorkflow(wf, params, hooks) {
+export async function runWorkflow(wf, params, hooks, id = Math.random().toString(36).slice(2, 9)) {
   run.stop = false;
   const ctx = { params };
-  const r = { wf, steps: wf.steps.map((s) => ({ agent: s.agent, title: s.title, status: 'wartet', msg: '' })), finished: false, error: '' };
+  const r = { id, wf, steps: wf.steps.map((s) => ({ agent: s.agent, title: s.title, status: 'wartet', msg: '' })), finished: false, error: '' };
   run.current = r;
   logAct(`Ablauf gestartet: ${wf.name}`);
   hooks.update();
@@ -175,11 +242,15 @@ export async function runWorkflow(wf, params, hooks) {
     hooks.update();
     try {
       if (st.confirm) {
+        row.status = 'wartet auf Genehmigung';
+        hooks.update();
         const ok = await hooks.confirm(st.confirm(ctx));
+        row.status = 'läuft';
         if (!ok) { row.status = 'abgelehnt'; row.msg = 'Von dir abgebrochen'; r.error = 'Abgebrochen. Es wurde nichts verändert.'; await st.onDeny?.(ctx); break; }
         if (run.stop) { row.status = 'gestoppt'; r.error = 'Not-Stopp ausgelöst.'; break; }
       }
-      row.msg = (await st.run(ctx)) || '';
+      row.msg = (await withTimeout(Promise.resolve().then(() => st.run(ctx)), st.timeout || STEP_TIMEOUT_MS, st.title)) || '';
+      // Ein während des Schritts ausgelöster Not-Stopp greift vor dem nächsten Schritt (Schleifenanfang).
       row.status = 'fertig';
     } catch (e) {
       row.status = 'fehler';
@@ -190,6 +261,7 @@ export async function runWorkflow(wf, params, hooks) {
     hooks.update();
   }
   r.finished = true;
+  remember(r, r.error ? (run.stop ? 'gestoppt' : 'fehler') : 'fertig');
   logAct(r.error ? `Ablauf beendet mit Fehler: ${wf.name}` : `Ablauf abgeschlossen: ${wf.name}`, r.error ? 'trash' : 'task');
   hooks.update();
   return r;

@@ -30,6 +30,7 @@ export function ws() {
 }
 const save = (fn) => store.update((s) => { fn(s.gpt); });
 const running = new Map(); // Panel-ID -> AbortController (nur Laufzeit)
+const partials = new Map(); // Panel-ID -> gestreamter Text der laufenden Antwort
 
 /** Modelle, die in einem Fenster gewählt werden können. */
 function usableExperts(st = store.get()) {
@@ -191,7 +192,11 @@ async function askPanel(panelId, text, { quiet = false } = {}) {
   paintPanel(panelId);
   const run = async () => {
     if (ctrl.signal.aborted) throw new Error('abgebrochen');
-    return callExpert(ex, msgs, st.settings, { signal: ctrl.signal });
+    return callExpert(ex, msgs, st.settings, { signal: ctrl.signal, onToken: (t) => {
+      partials.set(panelId, t);
+      const el = view?.querySelector(`[data-feed="${panelId}"] .msg-thinking .stream`);
+      if (el) { el.innerHTML = md(t); el.closest('.gw-feed').scrollTop = 1e9; }
+    } });
   };
   try {
     const r = await (ex.local ? queueLocal(run) : run());
@@ -200,10 +205,13 @@ async function askPanel(panelId, text, { quiet = false } = {}) {
     return r.content;
   } catch (e) {
     actions.recordExpert?.(ex.id, { ok: false, error: e.message });
-    pushMsg(panelId, { role: 'assistant', text: `Keine Antwort von ${ex.label}: ${e.message}`, error: true });
+    const part = partials.get(panelId);
+    if (ctrl.signal.aborted && part) pushMsg(panelId, { role: 'assistant', text: `${part}\n\n*– abgebrochen –*`, model: ex.label });
+    else pushMsg(panelId, { role: 'assistant', text: ctrl.signal.aborted ? 'Abgebrochen.' : `Keine Antwort von ${ex.label}: ${e.message}`, error: !ctrl.signal.aborted });
     return null;
   } finally {
     running.delete(panelId);
+    partials.delete(panelId);
     paintPanel(panelId);
   }
 }
@@ -257,7 +265,7 @@ function feedHtml(p, st) {
   const state = panelState(p, st);
   const busy = running.has(p.id);
   const body = p.messages.map((m) => msgHtml(m, p)).join('');
-  const thinking = busy ? `<div class="msg msg-ai msg-thinking"><div class="msg-head"><span class="avatar"></span><b>${esc(panelLabel(p, st))}</b><span class="src src-sys">antwortet …</span></div><div class="bubble"><span class="dots"><i></i><i></i><i></i></span></div></div>` : '';
+  const thinking = busy ? `<div class="msg msg-ai msg-thinking"><div class="msg-head"><span class="avatar"></span><b>${esc(panelLabel(p, st))}</b><span class="src src-sys">antwortet …</span></div><div class="bubble"><div class="stream">${partials.get(p.id) ? md(partials.get(p.id)) : ''}</div>${partials.get(p.id) ? '' : '<span class="dots"><i></i><i></i><i></i></span>'}</div></div>` : '';
   if (body || thinking) return body + thinking;
   if (state === 'off') {
     return `<div class="gw-off"><span class="led led-warn"></span><b>${OFFLINE}</b><span class="muted">${usableExperts(st).length ? 'Wähle oben ein verbundenes Modell.' : 'Noch kein KI-Modell eingerichtet. Lokale Modelle (z. B. Ollama) sind kostenlos.'}</span><button class="btn btn-sm" data-go="#/gpt/models">${icon('plug')} KI-Modelle öffnen</button></div>`;

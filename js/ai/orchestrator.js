@@ -97,7 +97,7 @@ function parseJudge(raw) {
  * @param opts.collab   optional 'always' – Zusammenarbeit nur für diese Anfrage
  * @returns null, wenn kein Modell verfügbar ist
  */
-export async function orchestrate(text, { mode = 'gpt', confirm, onStage = () => {}, collab } = {}) {
+export async function orchestrate(text, { mode = 'gpt', confirm, onStage = () => {}, collab, onToken, signal } = {}) {
   const st = store.get();
   // GPT-Modus „Team“: Zusammenarbeit für diese eine Anfrage erzwingen (ohne die Einstellung zu ändern)
   const s = collab ? { ...st.settings, collab, maxExperts: Math.max(2, st.settings.maxExperts || 2) } : st.settings;
@@ -169,7 +169,8 @@ export async function orchestrate(text, { mode = 'gpt', confirm, onStage = () =>
   const sequential = s.localSequential !== false && locals.length > 1;
   onStage((selected.length > 1 ? `Frage ${selected.length} Modelle ${sequential ? 'nacheinander' : 'parallel'}: ${selected.map((e) => e.label).join(', ')}` : `Frage ${selected[0].label} …`) + coldNote);
   const resultOf = new Map();
-  const call = (ex) => callExpert(ex, buildMessages(ex), s).then((v) => ({ status: 'fulfilled', value: v }), (e) => ({ status: 'rejected', reason: e }));
+  // Streaming nur, wenn genau ein Modell antwortet (sonst wird erst verglichen und zusammengeführt)
+  const call = (ex) => callExpert(ex, buildMessages(ex), s, { signal, onToken: selected.length === 1 ? onToken : undefined }).then((v) => ({ status: 'fulfilled', value: v }), (e) => ({ status: 'rejected', reason: e }));
   const externalRuns = Promise.all(selected.filter((e) => !e.local || !sequential).map(async (ex) => resultOf.set(ex, await call(ex))));
   if (sequential) {
     for (const [i, ex] of locals.entries()) {

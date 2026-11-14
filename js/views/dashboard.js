@@ -37,12 +37,12 @@ export default {
   onMount(root, ctx) {
     if (agentClient.connected && Date.now() - logAt > 5000) {
       logAt = Date.now();
-      agentClient.log().then((l) => { const changed = JSON.stringify(l.log) !== JSON.stringify(liveLog); liveLog = l.log; if (changed && root.dataset.view === 'dashboard') ctx.rerender(); }).catch(() => {});
+      agentClient.log().then((l) => { const changed = JSON.stringify(l.log) !== JSON.stringify(liveLog); liveLog = l.log; if (changed && root.dataset.view === 'dashboard') (ctx.softRerender || ctx.rerender)(); }).catch(() => {});
     }
     if (probed) return;
     probed = true; // einmal pro Sitzung automatisch messen, danach nur auf Knopfdruck
     Promise.all([sysmon.measureLatency(), sysmon.readStorage(), sysmon.readBattery()])
-      .then(() => root.dataset.view === 'dashboard' && ctx.rerender());
+      .then(() => root.dataset.view === 'dashboard' && (ctx.softRerender || ctx.rerender)());
   },
   onChange(el, ctx) {
     if (el.dataset.dashUlt !== undefined) { actions.setSettings({ ultimateDev: el.checked }); ctx.rerender(); }
@@ -70,7 +70,7 @@ export default {
 
     const statusRows = [
       ['KI-Koordination', engine.v, engine.tone, engine.note],
-      ['Spracheingabe', voice.sttSupported ? 'Web Speech API' : 'nicht unterstützt', voice.sttSupported ? 'ok' : 'danger', voice.sttSupported ? 'bereit' : 'Browser'],
+      ['Spracheingabe', voice.sttEngine === 'agent' ? 'Windows, lokal' : voice.sttSupported ? 'Web Speech API' : 'nicht verfügbar', voice.sttSupported ? 'ok' : 'danger', voice.sttSupported ? 'bereit' : (voice.sttReason || '').slice(0, 60)],
       ['Sprachausgabe', voice.ttsSupported ? (s.settings.voiceOutput ? 'aktiv' : 'stumm') : 'nicht unterstützt', voice.ttsSupported ? 'ok' : 'danger', voice.ttsSupported ? 'bereit' : ''],
       ['Wake-Word „Hey C“', !voice.wakeSupported ? 'nicht verfügbar' : st.wake ? 'hört zu' : 'aus', st.wake ? 'ok' : 'idle', ''],
       ['Lokaler Speicher', `${store.sizeKB()} KB`, store.storageOk() ? 'ok' : 'danger', store.storageOk() ? 'gesichert' : 'Fehler'],

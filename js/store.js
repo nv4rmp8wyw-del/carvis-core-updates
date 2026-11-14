@@ -11,7 +11,7 @@ export const defaultSettings = () => ({
   voiceName: '',
   rate: 1,
   pitch: 1,
-  volume: 1,
+  volume: 1, // Lautstärke der Sprachausgabe 0…1
   lang: 'de-DE',
   wakeWord: false,
   autoSendVoice: true,

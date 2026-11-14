@@ -50,7 +50,8 @@ export default {
       </section>
 
       <section class="card glass">
-        <header class="card-head"><h2>Spracheingabe</h2><span class="tag ${voice.sttSupported ? 'tag-ok' : 'tag-danger'}">${voice.sttSupported ? 'verfügbar' : 'nicht unterstützt'}</span></header>
+        <header class="card-head"><h2>Spracheingabe</h2><span class="tag ${voice.sttSupported ? 'tag-ok' : 'tag-danger'}">${voice.sttEngine === 'agent' ? 'lokal (Windows)' : voice.sttSupported ? 'Browser' : 'nicht verfügbar'}</span></header>
+        <p class="muted small" data-stt-info>${voice.sttEngine === 'agent' ? 'Die Windows-App nimmt hier auf und erkennt die Sprache lokal mit der Windows-Spracherkennung (offline, keine Cloud). Die Aufnahme endet automatisch nach einer Sprechpause.' : voice.sttEngine === 'web' ? 'Der Browser erkennt die Sprache über die Web Speech API; Chrome und Edge senden das Audio dazu an Google- bzw. Microsoft-Server.' : voice.sttReason}</p>
         <label class="switch"><input type="checkbox" data-set="autoSendVoice" ${st.autoSendVoice ? 'checked' : ''}><span></span> Erkannten Text automatisch senden</label>
         <label class="switch ${voice.wakeSupported ? '' : 'disabled'}"><input type="checkbox" data-set="wakeWord" ${st.wakeWord && voice.wakeSupported ? 'checked' : ''} ${voice.wakeSupported ? '' : 'disabled'}><span></span> Wake-Word „Hey C“ <span class="tag tag-warn">experimentell</span></label>
         <p class="muted small">${voice.wakeSupported

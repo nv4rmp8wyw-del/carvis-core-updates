@@ -37,8 +37,52 @@ export function findings(p, net) {
 
 function tile(label, value, note = '') { return `<div class="tile"><span class="muted small">${esc(label)}</span><b style="font-size:1.4rem;display:block">${value}</b><span class="muted small">${note}</span></div>`; }
 
+// ---------- Optimierungsprofile (4.0): jede Maßnahme mit Zustand, Wirkung, Nachteilen, Rechten, Rückweg; abwählbar ----------
+// Nur Maßnahmen, die der Agent wirklich kann (power_plan, temp_quarantine, autostart_disable). Keine erfundenen FPS-Gewinne.
+export const MEASURES = {
+  power_high: { title: 'Energieprofil „Höchstleistung“', step: { op: 'power_plan', plan: 'high' }, target: 'Höchstleistung',
+    effect: 'CPU taktet schneller hoch; kann Ruckler in Spielen und Ladezeiten verringern. Wirkung messbar, nicht garantiert.',
+    risk: 'Mehr Stromverbrauch, wärmer, Laptop-Akku hält kürzer.', rights: 'keine Administratorrechte', restart: 'nein', undo: 'ja, auf das vorherige Profil' },
+  power_balanced: { title: 'Energieprofil „Ausbalanciert“', step: { op: 'power_plan', plan: 'balanced' }, target: 'Ausbalanciert',
+    effect: 'Windows-Standard: gute Leistung bei moderatem Verbrauch.', risk: 'Etwas langsameres Hochtakten als „Höchstleistung“.', rights: 'keine Administratorrechte', restart: 'nein', undo: 'ja, auf das vorherige Profil' },
+  temp: { title: 'Alte Temp-Dateien (> 7 Tage) in Quarantäne', step: { op: 'temp_quarantine', days: 7 }, target: 'aufgeräumt',
+    effect: 'Gibt Speicherplatz frei. Auf die Leistung meist ohne messbare Wirkung.', risk: 'Gering: nichts wird gelöscht, Dateien liegen in einer Quarantäne.', rights: 'nur eigener Benutzer', restart: 'nein', undo: 'ja, Dateien werden zurückgelegt' },
+};
+export const OPT_PROFILES = [
+  { id: 'balanced', label: 'Ausgeglichen', items: ['power_balanced', 'temp'], note: 'Alltag, leise, sparsam' },
+  { id: 'performance', label: 'Leistung', items: ['power_high', 'temp'], note: 'Arbeiten mit viel Rechenlast' },
+  { id: 'gaming', label: 'Gaming', items: ['power_high'], note: 'Spiele; Autostart-Programme einzeln wählbar' },
+  { id: 'custom', label: 'Benutzerdefiniert', items: [], note: 'Maßnahmen selbst zusammenstellen' },
+];
+const currentOf = (key, p) => (key.startsWith('power') ? (p?.power || 'erst messen') : key === 'temp' ? 'nicht geprüft (Vorschau zählt die Dateien)' : '–');
+
+function profilePanel(st) {
+  const pr = S.profile;
+  if (!pr) return '';
+  const all = [...Object.keys(MEASURES), ...((S.p?.autostart || []).slice(0, 12).map((n) => `auto:${n}`))];
+  const meta = (k) => (k.startsWith('auto:') ? { title: `Autostart aus: ${k.slice(5)}`, target: 'nicht mehr automatisch starten', effect: 'Schnellerer Windows-Start, weniger Hintergrundlast.', risk: 'Das Programm startet nicht mehr von selbst.', rights: 'nur eigener Benutzer (HKCU)', restart: 'wirkt ab nächster Anmeldung', undo: 'ja' } : MEASURES[k]);
+  return `<section class="card glass" data-opt-profile="${pr.id}"><header class="card-head"><h2>${icon('bolt')} Profil: ${esc(OPT_PROFILES.find((x) => x.id === pr.id).label)}</h2><button class="btn btn-sm btn-ghost" data-act="profile-close">Schließen</button></header>
+    <p class="muted small">Haken entfernen, um eine Maßnahme auszulassen. Es wird erst nach der Vorschau und deiner Bestätigung etwas geändert.</p>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th></th><th>Maßnahme</th><th>Aktuell</th><th>Empfohlen</th><th>Wirkung</th><th>Nachteile</th><th>Rechte</th><th>Neustart</th><th>Rückgängig</th></tr></thead><tbody>
+      ${all.map((k) => { const m = meta(k); return `<tr data-measure="${esc(k)}"><td><input type="checkbox" data-measure-check="${esc(k)}" ${pr.items.includes(k) ? 'checked' : ''} aria-label="${esc(m.title)} auswählen"></td><td><b>${esc(m.title)}</b></td><td>${esc(currentOf(k, S.p))}</td><td>${esc(m.target)}</td><td class="small">${esc(m.effect)}</td><td class="small">${esc(m.risk)}</td><td class="small">${esc(m.rights)}</td><td class="small">${esc(m.restart)}</td><td class="small">${esc(m.undo)}</td></tr>`; }).join('')}
+    </tbody></table></div>
+    ${pr.items.filter((k) => k.startsWith('power')).length > 1 ? '<div class="notice notice-warn">Bitte nur ein Energieprofil wählen.</div>' : ''}
+    <div class="row-actions" style="margin-top:12px"><button class="btn btn-primary" data-act="profile-prepare" ${!agentClient.connected || S.busy || !pr.items.length || pr.items.filter((k) => k.startsWith('power')).length > 1 ? 'disabled' : ''}>${pr.items.length} Maßnahme${pr.items.length === 1 ? '' : 'n'} vorbereiten (Vorschau)</button></div>
+  </section>`;
+}
+
 export default {
   id: 'perf',
+  onChange(el, ctx) {
+    const k = el.dataset.measureCheck;
+    if (k && S.profile) {
+      const set = new Set(S.profile.items);
+      if (el.checked) set.add(k); else set.delete(k);
+      S.profile.items = [...set];
+      if (S.profile.id !== 'custom' && JSON.stringify([...set].sort()) !== JSON.stringify([...(OPT_PROFILES.find((q) => q.id === S.profile.id).items)].sort())) S.profile.changed = true;
+      ctx.rerender();
+    }
+  },
   title: 'Optimierung',
   icon: 'dashboard',
   render(st) {
@@ -51,12 +95,10 @@ export default {
       <button class="btn btn-primary" data-act="perf-run" ${!agentClient.connected || S.busy ? 'disabled' : ''}>${S.busy === 'perf' ? 'Messe …' : 'Jetzt messen'}</button></header>
       ${agentClient.connected ? '' : `<div class="notice notice-warn">Kein Desktop-Agent verbunden. In der Windows-App startet er automatisch; im Browser ist er nur lokal nutzbar. Ohne Agent gibt es hier keine Messwerte (der Browser darf sie nicht lesen).</div>`}
       <section class="card glass opt-hero" data-opt-hero>
-        <div><h2>Ein Klick zur Optimierung</h2><p class="muted small">Jede Aktion zeigt zuerst eine Vorschau und läuft erst nach deiner Bestätigung. Nichts wird gelöscht, alles lässt sich rückgängig machen.</p></div>
-        <div class="opt-hero-actions">
-          <button class="btn btn-primary" data-act="opt-pc" ${!agentClient.connected || S.busy ? 'disabled' : ''}>PC optimieren</button>
-          <button class="btn btn-primary" data-act="opt-gaming" ${!agentClient.connected || S.busy ? 'disabled' : ''}>Gaming optimieren</button>
-        </div>
+        <div><h2>Optimierungsprofil wählen</h2><p class="muted small">Ein Klick zeigt die Maßnahmen mit Zustand, Wirkung, Nachteilen und Rückweg. Abwählen ist möglich; geändert wird erst nach Vorschau und Bestätigung. Nichts wird gelöscht.</p></div>
+        <div class="opt-hero-actions">${OPT_PROFILES.map((x) => `<button class="btn ${S.profile?.id === x.id ? 'btn-primary' : ''}" data-act="profile-pick" data-id="${x.id}" title="${esc(x.note)}" ${!agentClient.connected || S.busy ? 'disabled' : ''}>${esc(x.label)}</button>`).join('')}</div>
       </section>
+      ${profilePanel(st)}
       ${S.err ? `<div class="notice notice-warn" data-perf-error>${esc(S.err)}</div>` : ''}
       <div class="grid">
         <section class="card glass span-2"><header class="card-head"><h2>${icon('core')} System</h2>${p ? `<span class="tag">${esc(p.platform)}</span>` : ''}</header>
@@ -102,6 +144,14 @@ export default {
     try {
       if (act === 'perf-run') { S.busy = 'perf'; S.err = ''; ctx.rerender(); S.p = await agentClient.perf(); }
       if (act === 'net-run') { S.busy = 'net'; S.err = ''; ctx.rerender(); const r = await agentClient.net(NET_TARGETS); S.net = Array.isArray(r) ? r : r.results; }
+      if (act === 'profile-pick') { const x = OPT_PROFILES.find((q) => q.id === el.dataset.id); S.profile = { id: x.id, items: [...x.items] }; if (!S.p && agentClient.connected) { S.busy = 'perf'; ctx.rerender(); S.p = await agentClient.perf(); } }
+      if (act === 'profile-close') S.profile = null;
+      if (act === 'profile-prepare' && S.profile) {
+        S.busy = 'opt'; S.err = ''; S.optJob = null; ctx.rerender();
+        const steps = S.profile.items.map((k) => (k.startsWith('auto:') ? { op: 'autostart_disable', name: k.slice(5) } : MEASURES[k].step));
+        const r = await agentClient.ultPlan(`Profil ${S.profile.id}`, steps);
+        S.opt = { id: r.id, preview: (r.steps || []).map((x) => x.preview) };
+      }
       if (act.startsWith('opt-') && !['opt-go', 'opt-cancel', 'opt-undo'].includes(act)) {
         S.busy = 'opt'; S.err = ''; S.optJob = null; ctx.rerender();
         const steps = act === 'opt-pc' ? [{ op: 'temp_quarantine', days: 7 }, { op: 'power_plan', plan: 'balanced' }]

@@ -4,12 +4,64 @@ import { icon, toast, confirmDialog, modal } from '../ui.js';
 import { actions, store } from '../store.js';
 import { CATALOG, COST_LABEL, makeExpert, discoverOllama, discoverProxy, callExpert } from '../ai/providers.js';
 
+import { snapshot, lastSnapshot, modelRows, recommend, STARTER, STATUS_LABEL, STATUS_LED, pullModel, setLoaded, deleteModel, connectInstalled } from '../ai/modelmanager.js';
 import { BROWSER_MODELS, webgpuStatus, onProgress, progress, load as loadBrowserModel, removeModel } from '../ai/webllm.js';
 
 export function browserExpert(m) {
   const ex = makeExpert({ provider: 'webllm', vendorKey: 'webllm', model: m.id, label: `${m.name} · im Browser`, cost: 'free', local: true });
   ex.strengths = { ...m.strengths };
   return ex;
+}
+
+// ---- Modellmanager (4.0): Hardware, Ollama-Zustand, Status je Modell, Ein-Klick-Grundausstattung ----
+const fmtGB = (b) => (b ? `${(b / 1024 ** 3).toFixed(1).replace('.', ',')} GB` : '–');
+let mm = { loading: false, pulling: null, pct: null, phase: '', err: '' };
+function managerCard(st) {
+  const snap = lastSnapshot();
+  const { hw, ollama } = snap;
+  if (!hw) return `<section class="card glass mm" style="margin-bottom:16px"><header class="card-head"><h2>${icon('plug')} Modellmanager</h2></header><p class="muted">Hardware und lokale KI werden geprüft …</p></section>`;
+  const rec = recommend(hw.ramGB);
+  const rows = modelRows(snap);
+  const anyConnected = st.experts.some((e) => e.enabled && e.local);
+  const remoteSite = !['localhost', '127.0.0.1'].includes(location.hostname) && !hw.source?.startsWith('agent');
+  const ollamaLine = ollama?.running
+    ? `<span class="led led-ok"></span>Ollama ${esc(ollama.version || '')} läuft · ${ollama.installed.length} installiert · ${ollama.loaded.length} geladen`
+    : hw.ollama?.installed ? '<span class="led led-warn"></span>Ollama installiert, aber nicht gestartet'
+    : remoteSite ? '<span class="led led-idle"></span>Lokale KI ist von der Website aus nicht erreichbar (Browser-Schutz für lokale Dienste) – in der Windows-App oder über localhost nutzen'
+    : '<span class="led led-idle"></span>Ollama nicht gefunden';
+  const pulling = mm.pulling ? `<div class="mm-progress"><b>${esc(mm.pulling)}</b> · ${esc(mm.phase)}${mm.pct != null ? ` · ${mm.pct} %` : ''}<div class="progress"><span style="--w:${mm.pct || 3}%"></span></div><button class="btn btn-sm btn-ghost" data-act="mm-cancel">Abbrechen</button></div>` : '';
+  return `<section class="card glass mm" style="margin-bottom:16px" data-mm>
+    <header class="card-head"><h2>${icon('plug')} Modellmanager</h2><button class="btn btn-sm" data-act="mm-refresh" ${mm.loading ? 'disabled' : ''}>${icon('reset')} Neu prüfen</button></header>
+    <ul class="status-list mm-hw">
+      <li><span class="led led-${hw.ramGB ? 'ok' : 'idle'}"></span><span class="k">Arbeitsspeicher</span><span class="v">${hw.ramGB ? `${hw.ramGB} GB${hw.memory?.approx ? ' (Browser-Schätzung)' : ''}` : 'unbekannt'}${hw.memory?.available ? `<small>${fmtGB(hw.memory.available)} frei</small>` : ''}</span></li>
+      <li><span class="led led-${hw.gpu ? 'ok' : 'idle'}"></span><span class="k">Grafikkarte</span><span class="v">${hw.gpu ? `${esc(hw.gpu.name)}<small>${Math.round(hw.gpu.memTotalMB / 1024)} GB VRAM</small>` : hw.source === 'agent' ? 'keine NVIDIA-GPU erkannt' : 'im Browser nicht auslesbar'}</span></li>
+      <li><span class="led led-${hw.webgpuAdapter ? 'ok' : 'idle'}"></span><span class="k">WebGPU (KI im Browser)</span><span class="v">${hw.webgpuAdapter ? 'verfügbar' : 'nicht verfügbar'}</span></li>
+      ${hw.diskFree != null ? `<li><span class="led led-${hw.diskFree > 10 * 1024 ** 3 ? 'ok' : 'warn'}"></span><span class="k">Freier Speicherplatz</span><span class="v">${fmtGB(hw.diskFree)}</span></li>` : ''}
+      <li class="mm-ollama"><span class="k" style="grid-column:1/-1">${ollamaLine}</span></li>
+    </ul>
+    ${!anyConnected ? `<div class="notice notice-info mm-start"><b>Kostenlose Grundausstattung:</b> ${rec ? `Empfohlen für ${hw.ramGB ? `${hw.ramGB} GB RAM` : 'dieses Gerät'}: <b>${esc(rec.label)}</b> (ca. ${String(rec.sizeGB).replace('.', ',')} GB, Lizenz ${esc(rec.license)}).` : 'Für lokale Sprachmodelle reicht der Arbeitsspeicher nicht (mind. 4 GB).'}
+      ${ollama?.running && rec ? ` <button class="btn btn-primary btn-sm" data-act="mm-pull" data-name="${rec.name}">Einrichten</button>` : ''}
+      ${!ollama?.running && !remoteSite ? ' Dafür wird <b>Ollama</b> benötigt (kostenlos, separate Installation mit Windows-Bestätigung): <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a>. Ohne Installation: „KI im Browser“ weiter unten.' : ''}
+      <br><small class="muted">Ein Modell wird nicht mit CARVIS CORE ausgeliefert: Selbst das kleinste brauchbare Modell (≈ 0,4 GB) plus Laufzeit wäre ein Vielfaches der App (15 MB). Downloads starten nur nach deiner Zustimmung.</small></div>` : ''}
+    ${pulling}
+    <div class="tbl-wrap"><table class="tbl mm-table"><thead><tr><th>Modell</th><th>Status</th><th>Größe</th><th>Lizenz</th><th></th></tr></thead><tbody>
+      ${rows.map((r) => `<tr data-model="${esc(r.name)}"><td><b>${esc(r.label)}</b>${r.cat ? `<br><small class="muted">${esc(r.cat.note)}${r.cat.minRamGB ? ` · ab ${r.cat.minRamGB} GB RAM` : ''}</small>` : ''}</td>
+        <td><span class="led led-${STATUS_LED[r.status]}"></span> <span data-status>${STATUS_LABEL[r.status]}</span>${r.loaded ? `<br><small class="muted">${fmtGB(r.loaded.size)} im Speicher${r.loaded.vram ? `, davon ${fmtGB(r.loaded.vram)} VRAM` : ''}</small>` : ''}</td>
+        <td>${fmtGB(r.size)}${r.installed ? '' : ' <small class="muted">Download</small>'}</td>
+        <td>${r.cat ? esc(r.cat.license) : '<small class="muted">siehe Ollama-Bibliothek</small>'}</td>
+        <td class="row-actions">${!r.installed ? (ollama?.running && !r.tooBig && !mm.pulling ? `<button class="btn btn-sm" data-act="mm-pull" data-name="${esc(r.name)}">Herunterladen</button>` : '')
+          : `${!r.expert ? `<button class="btn btn-sm" data-act="mm-connect">Verbinden</button>` : ''}${r.loaded ? `<button class="btn btn-sm btn-ghost" data-act="mm-unload" data-name="${esc(r.name)}">Entladen</button>` : `<button class="btn btn-sm btn-ghost" data-act="mm-load" data-name="${esc(r.name)}">Laden</button>`}<button class="icon-btn sm ghost" data-act="mm-delete" data-name="${esc(r.name)}" aria-label="${esc(r.name)} löschen" title="Von der Festplatte löschen">${icon('trash')}</button>`}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="muted small">„Installiert“ heißt nicht „aktiv“: Verbunden = CARVIS darf es nutzen · Geladen = belegt gerade Arbeits-/Grafikspeicher · Aktiv = bearbeitet gerade eine Anfrage. Ollama entlädt ungenutzte Modelle nach 30 Minuten selbst; es bleibt immer nur das gebrauchte Modell geladen (empfohlen: OLLAMA_MAX_LOADED_MODELS=1). Ollama nutzt einen gemeinsamen Modellordner – nichts wird doppelt gespeichert.</p>
+    ${mm.err ? `<div class="notice notice-danger">${esc(mm.err)}</div>` : ''}
+  </section>`;
+}
+let pullCtrl = null;
+async function refreshManager(ctx, fresh = true) {
+  if (mm.loading) return;
+  mm.loading = true;
+  try { await snapshot({ fresh }); } finally { mm.loading = false; }
+  ctx.rerender();
 }
 
 // ---- KI im Browser ----
@@ -80,6 +132,8 @@ export default {
     return `<div class="page">
       <header class="page-head"><div><p class="eyebrow">Zentrale Koordination · CARVIS CORE 3.8</p><h1>KI-Modelle</h1>
         <p class="muted">CARVIS befragt die hier verbundenen Modelle, vergleicht ihre Antworten nachvollziehbar und führt sie zusammen. Es werden nur Modelle genutzt, die wirklich verbunden sind – nichts wird vorgetäuscht.</p></div></header>
+
+      ${managerCard(st)}
 
       <div class="ai-summary">
         <div class="ai-stat glass"><b>${o.connected}</b><span>verbunden & getestet</span></div>
@@ -167,8 +221,45 @@ export default {
     </div>`;
   },
 
+  onMount(root, ctx) {
+    if (!lastSnapshot().hw || Date.now() - lastSnapshot().at > 15000) refreshManager(ctx, false);
+  },
   async onAct(act, el, ctx) {
     const s = store.get().settings;
+    if (act === 'mm-refresh') return refreshManager(ctx);
+    if (act === 'mm-cancel') { pullCtrl?.abort(); return; }
+    if (act === 'mm-connect') {
+      try { const n = await connectInstalled(); toast(n ? `${n} Modell${n === 1 ? '' : 'e'} verbunden` : 'Alle installierten Modelle sind bereits verbunden', 'ok'); } catch (e) { toast(`Verbinden fehlgeschlagen: ${e.message}`, 'danger'); }
+      return refreshManager(ctx);
+    }
+    if (act === 'mm-pull') {
+      const name = el.dataset.name;
+      const c = STARTER.find((x) => x.name === name);
+      const hw = lastSnapshot().hw || {};
+      const ok = await confirmDialog(`„${c?.label || name}“ herunterladen?\n\nGröße: ca. ${c ? String(c.sizeGB).replace('.', ',') : '?'} GB (aus der Ollama-Bibliothek, einmalig, im gemeinsamen Ollama-Modellordner)\nLizenz: ${c?.license || 'siehe ollama.com/library'}\nEmpfohlen ab: ${c?.minRamGB || '?'} GB RAM${hw.ramGB ? ` (dieses Gerät: ${hw.ramGB} GB)` : ''}\nKosten: 0 €`, { title: 'KI-Modell einrichten', ok: 'Herunterladen', danger: false });
+      if (!ok) return;
+      mm = { ...mm, pulling: name, pct: 0, phase: 'startet', err: '' };
+      pullCtrl = new AbortController();
+      ctx.rerender();
+      try {
+        await pullModel(name, { signal: pullCtrl.signal, onProgress: (p) => { mm.phase = p.status; if (p.pct != null) mm.pct = p.pct; const bar = document.querySelector('.mm-progress'); if (bar) { bar.querySelector('span').style.setProperty('--w', `${mm.pct || 3}%`); bar.firstChild.nextSibling.textContent = ` · ${p.status}${mm.pct != null ? ` · ${mm.pct} %` : ''}`; } } });
+        toast(`${c?.label || name} ist eingerichtet und verbunden`, 'ok', 5000);
+        ctx.renderStatus();
+      } catch (e) { mm.err = `Download fehlgeschlagen: ${e.message}`; }
+      mm.pulling = null; pullCtrl = null;
+      return refreshManager(ctx);
+    }
+    if (act === 'mm-load' || act === 'mm-unload') {
+      el.disabled = true;
+      try { await setLoaded(el.dataset.name, act === 'mm-load'); } catch (e) { toast(`${act === 'mm-load' ? 'Laden' : 'Entladen'} fehlgeschlagen: ${e.message}`, 'danger'); }
+      return refreshManager(ctx);
+    }
+    if (act === 'mm-delete') {
+      if (!(await confirmDialog(`„${el.dataset.name}“ von der Festplatte löschen? Ein erneuter Download ist jederzeit möglich.`, { ok: 'Löschen' }))) return;
+      try { await deleteModel(el.dataset.name); toast('Modell gelöscht', 'ok'); } catch (e) { toast(`Löschen fehlgeschlagen: ${e.message}`, 'danger'); }
+      ctx.renderStatus();
+      return refreshManager(ctx);
+    }
     if (act === 'collab') { actions.setSettings({ collab: el.dataset.v }); return; }
     if (act === 'webllm-download') {
       const m = BROWSER_MODELS.find((x) => x.id === el.dataset.id);
