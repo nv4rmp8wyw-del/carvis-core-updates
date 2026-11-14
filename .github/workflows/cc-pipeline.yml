@@ -224,12 +224,14 @@ jobs:
           v=$(sed -n "s/^export const VERSION = '\([^']*\)'.*/\1/p" js/version.js)
           t=$(python3 -c "import json;print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
           [ "$v" = "$t" ] || { echo "::error::Version uneinheitlich: $v / $t"; exit 1; }
-          frei=ja
-          if [ "${v%%.*}" -ge 4 ]; then
-            f=$(grep -v '^#' .github/release-freigabe.txt 2>/dev/null | tr -d '[:space:]' || true)
-            [ "$f" = "$v" ] || { frei=nein; echo "::warning::$v ist nicht freigegeben (.github/release-freigabe.txt: '${f:-leer}') – nichts veröffentlicht."; }
-          fi
-          echo "version=$v" >> "$GITHUB_OUTPUT"; echo "frei=$frei" >> "$GITHUB_OUTPUT"
+          # Veröffentlichungssperre (D-046): JEDE Version nur mit genau diesem Eintrag in .github/release-freigabe.txt
+          # (früher erst ab Hauptversion 4 – eine Nummer 1.x/3.x wäre ohne Freigabe veröffentlicht worden).
+          f=$(grep -v '^#' .github/release-freigabe.txt 2>/dev/null | tr -d '[:space:]' || true)
+          frei=nein
+          [ "$f" = "$v" ] && frei=ja || echo "::warning::$v ist nicht freigegeben (.github/release-freigabe.txt: '${f:-leer}') – nichts veröffentlicht."
+          # Produktversion für den Release-Titel (D-046): Build 4.x.y = CARVIS CORE v1.x.y
+          m=${v%%.*}; if [ "$m" -ge 4 ]; then label="CARVIS CORE v$((m-3)).${v#*.} (Build $v)"; else label="CARVIS CORE $v"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"; echo "frei=$frei" >> "$GITHUB_OUTPUT"; echo "label=$label" >> "$GITHUB_OUTPUT"
       - name: Web-App zusammenstellen
         if: steps.v.outputs.frei == 'ja'
         working-directory: src
@@ -275,4 +277,4 @@ jobs:
 
           Im Browser nutzen: https://nv4rmp8wyw-del.github.io/carvis-core-updates/
           EOF
-          gh release create "v$V" out/* --repo "${{ github.repository }}" --title "CARVIS CORE $V" --notes-file notes.md --latest
+          gh release create "v$V" out/* --repo "${{ github.repository }}" --title "${{ steps.v.outputs.label }}" --notes-file notes.md --latest
