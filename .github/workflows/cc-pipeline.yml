@@ -125,6 +125,7 @@ jobs:
           npm install --no-save --no-package-lock playwright@1.49.1
           npx playwright install --with-deps chromium
       - name: Echter KI-Test
+        timeout-minutes: 15
         run: |
           if [ ! -f tools/v391-real-ollama-test.js ]; then echo "Kein Echt-KI-Test in diesem Stand."; exit 0; fi
           python3 tools/dev-server.py > /tmp/dev.log 2>&1 &
