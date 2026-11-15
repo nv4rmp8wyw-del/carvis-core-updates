@@ -13,15 +13,31 @@
 #      .github/release-freigabe.txt): Website (gh-pages) aktualisieren; bei neuer Versionsnummer öffentliches Release.
 #
 # Secret SOURCE_TOKEN: fein granularer Zugriffsschlüssel NUR für nv4rmp8wyw-del/carvis-core-c, "Contents: Read-only".
+#
+# TEST-Kanal (Inhaber 15.11.2026, D-048): nächste Version PRIVAT bauen und testen, ohne öffentliche Dateien.
+#   - automatisch um :10/:30/:50 (Zweig vars.TEST_ZWEIG, Standard feature/v1.1) oder von Hand mit kanal=test
+#   - gebaut mit eigener Kennung de.carviscore.app.test / Name CARVIS-CORE-TEST (überschreibt STABLE nie)
+#   - KEIN öffentliches Artefakt, KEINE Website, KEIN öffentliches Release. Installer, portable EXE, Web-Paket und
+#     Prüfsummen gehen nur als Pre-Release v<Version>-test.<Lauf> in das PRIVATE Repo; zuerst als Entwurf, erst nach
+#     allen grünen Tests sichtbar (sonst gelöscht). Das Update-Center (Entwicklerkanal, GitHub-Anmeldung) bietet es an.
+#   - Secret TEST_RELEASE_TOKEN: fein granularer Schlüssel NUR für carvis-core-c, "Contents: Read and write".
+#     Wird nur im Hochlade-Schritt und im Freigabe-Job verwendet (dort läuft kein Code aus dem Repo).
+#   - Hinweis: Auch die Protokolle der TEST-Läufe sind öffentlich (Testnamen, Dateinamen, Prüfsummen; kein Quellcode).
 name: CC bauen, testen, veröffentlichen
 on:
   schedule:
-    - cron: "*/20 * * * *"
+    - cron: "*/20 * * * *"        # STABLE (main)
+    - cron: "10,30,50 * * * *"    # TEST (vars.TEST_ZWEIG, Standard feature/v1.1)
   workflow_dispatch:
     inputs:
       ref:
-        description: "Zweig/Commit im privaten Repo (Standard main)"
-        default: main
+        description: "Zweig/Commit im privaten Repo (leer = main bzw. beim TEST-Kanal der Testzweig)"
+        default: ""
+      kanal:
+        description: "stable = öffentlich nach Freigabe · test = nur privates Pre-Release, nie öffentlich"
+        type: choice
+        options: [stable, test]
+        default: stable
       veroeffentlichen:
         description: "Bei Erfolg veröffentlichen (nur wirksam für main)"
         type: boolean
@@ -31,13 +47,14 @@ on:
         type: boolean
         default: false
 concurrency:
-  group: cc-pipeline-${{ github.event.inputs.ref || 'main' }}
+  group: cc-pipeline-${{ (github.event.inputs.kanal == 'test' || github.event.schedule == '10,30,50 * * * *') && 'test' || 'stable' }}-${{ github.event.inputs.ref || 'auto' }}
   cancel-in-progress: false
 permissions:
   contents: read
 env:
   QUELLE: nv4rmp8wyw-del/carvis-core-c
-  REF: ${{ github.event.inputs.ref || 'main' }}
+  KANAL: ${{ (github.event.inputs.kanal == 'test' || github.event.schedule == '10,30,50 * * * *') && 'test' || 'stable' }}
+  REF: ${{ github.event.inputs.ref || ((github.event.inputs.kanal == 'test' || github.event.schedule == '10,30,50 * * * *') && (vars.TEST_ZWEIG || 'feature/v1.1')) || 'main' }}
 
 jobs:
   pruefen:
@@ -46,6 +63,7 @@ jobs:
     outputs:
       sha: ${{ steps.s.outputs.sha }}
       bauen: ${{ steps.s.outputs.bauen }}
+      kanal: ${{ steps.s.outputs.kanal }}
     steps:
       - name: Commit im privaten Repo und letzten veröffentlichten Stand vergleichen
         id: s
@@ -56,6 +74,16 @@ jobs:
           if [ -z "$GH_TOKEN" ]; then echo "::error::Secret SOURCE_TOKEN fehlt (siehe Kopf dieser Datei)."; exit 1; fi
           sha=$(gh api "repos/$QUELLE/commits/$REF" --jq .sha)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "kanal=$KANAL" >> "$GITHUB_OUTPUT"
+          if [ "$KANAL" = "test" ]; then
+            # TEST: schon ein privates Test-Release für genau diesen Commit? (Kennung „Quelle: <sha>“ in den Notizen)
+            if gh api "repos/$QUELLE/releases?per_page=30" --jq '.[] | select(.prerelease) | .body' | grep -q "Quelle: $sha" && [ "$ERZWINGEN" != "true" ]; then
+              echo "TEST $REF = ${sha::7}: bereits als privates Test-Release vorhanden."; echo "bauen=nein" >> "$GITHUB_OUTPUT"
+            else
+              echo "TEST $REF = ${sha::7}: wird gebaut (nur privat)."; echo "bauen=ja" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
           letzt=$(curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/gh-pages/.quelle" 2>/dev/null || true)
           echo "Quelle $REF = ${sha::7}, zuletzt veröffentlicht: ${letzt::7}"
           if [ "$REF" = "main" ] && [ "$sha" = "$letzt" ] && [ "$ERZWINGEN" != "true" ]; then
@@ -137,7 +165,9 @@ jobs:
     needs: pruefen
     if: needs.pruefen.outputs.bauen == 'ja'
     runs-on: windows-latest
-    timeout-minutes: 50
+    timeout-minutes: 75
+    outputs:
+      entwurf: ${{ steps.entwurf.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with: { repository: "${{ env.QUELLE }}", ref: "${{ needs.pruefen.outputs.sha }}", token: "${{ secrets.SOURCE_TOKEN }}" }
@@ -196,7 +226,74 @@ jobs:
           New-Item -ItemType Directory -Force portable | Out-Null
           Copy-Item src-tauri/target/release/carvis-core.exe portable/CARVIS-CORE.exe -Force
           python tools/test-portable.py portable/CARVIS-CORE.exe
+      - name: "TEST: Installer und portable EXE mit eigener Kennung bauen (überschreibt STABLE nie)"
+        if: env.KANAL == 'test'
+        run: |
+          $ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/stable" | Out-Null
+          Copy-Item src-tauri/target/release/bundle/nsis/*-setup.exe "$env:RUNNER_TEMP/stable/"
+          $v = (Select-String -Path js/version.js -Pattern "VERSION = '([^']+)'").Matches[0].Groups[1].Value
+          $m = [int]$v.Split('.')[0]; $pv = if ($m -ge 4) { "v$($m - 3)." + ($v -replace '^\d+\.', '') } else { $v }
+          python -c "import json,sys; p='src-tauri/tauri.conf.json'; c=json.load(open(p,encoding='utf-8')); c['identifier']='de.carviscore.app.test'; c['productName']='CARVIS-CORE-TEST'; [w.update(title=sys.argv[1]) for w in c.get('app',{}).get('windows',[])]; json.dump(c,open(p,'w',encoding='utf-8'),indent=2,ensure_ascii=False)" "CARVIS CORE $pv (Test)"
+          $env:CARVIS_APP_ID = 'de.carviscore.app.test'
+          Remove-Item src-tauri/target/release/bundle/nsis/*-setup.exe -Force
+          npx --yes @tauri-apps/cli@2 build
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/test" | Out-Null
+          Copy-Item src-tauri/target/release/bundle/nsis/CARVIS-CORE-TEST_*-setup.exe "$env:RUNNER_TEMP/test/"
+          $env:CARVIS_AGENT_EXE = (Resolve-Path agent-dist/carvis-agent.exe).Path
+          npx --yes @tauri-apps/cli@2 build --no-bundle --features portable
+          Copy-Item src-tauri/target/release/carvis-core.exe "$env:RUNNER_TEMP/test/portable.exe" -Force
+          "TEST_PV=$pv" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TEST_V=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: "TEST: portable EXE testen (eigener Datenordner)"
+        if: env.KANAL == 'test'
+        env: { CARVIS_APP_ID: de.carviscore.app.test }
+        run: python tools/test-portable.py "$env:RUNNER_TEMP/test/portable.exe"
+      - name: "TEST: neben STABLE installieren, starten, entfernen – STABLE-Programm und -Daten bleiben unverändert"
+        if: env.KANAL == 'test'
+        run: |
+          if (-not (Test-Path tools/test-test-channel.py)) { Write-Host "Kein Koexistenz-Test in diesem Stand."; exit 0 }
+          python tools/test-test-channel.py (Get-ChildItem "$env:RUNNER_TEMP/stable/*-setup.exe").FullName (Get-ChildItem "$env:RUNNER_TEMP/test/*-setup.exe").FullName
+      - name: "TEST: Dateien sammeln (Installer, portable EXE, Web-Paket, Prüfsummen)"
+        if: env.KANAL == 'test'
+        shell: pwsh
+        run: |
+          $n = "${{ github.run_number }}"
+          New-Item -ItemType Directory -Force out | Out-Null
+          # Name passend zum Update-Center ab v1.0 (CARVIS-CORE_<Version>_x64-setup.exe); Inhalt ist die separate App CARVIS-CORE-TEST
+          Copy-Item (Get-ChildItem "$env:RUNNER_TEMP/test/*-setup.exe").FullName "out/CARVIS-CORE_$($env:TEST_V)-test.$($n)_x64-setup.exe"
+          Copy-Item "$env:RUNNER_TEMP/test/portable.exe" "out/CARVIS-CORE-TEST-$($env:TEST_PV)-portable.exe"
+          Compress-Archive -Path dist/* -DestinationPath "out/CARVIS-CORE-TEST-$($env:TEST_PV)-web.zip"
+          Get-ChildItem out -File | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content -Encoding ascii out/SHA256SUMS.txt
+          Get-Content out/SHA256SUMS.txt
+      - name: "TEST: als ENTWURF ins private Repo hochladen (nicht öffentlich, im Update-Center erst nach allen Tests)"
+        id: entwurf
+        if: env.KANAL == 'test'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.TEST_RELEASE_TOKEN }}
+          SHA: ${{ needs.pruefen.outputs.sha }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::Secret TEST_RELEASE_TOKEN fehlt – Build und Tests sind gelaufen, aber nichts wurde hochgeladen (es gibt bewusst KEIN öffentliches Artefakt)."
+            exit 0
+          fi
+          tag="v${TEST_V}-test.${{ github.run_number }}"
+          cat > notes.md <<EOF
+          **CARVIS CORE ${TEST_PV} – TESTVERSION (privat, nicht freigegeben)**
+
+          - Installiert die **separate App „CARVIS-CORE-TEST“** (eigener Ordner, eigene Daten). Deine STABLE-Version und ihre Daten bleiben unverändert.
+          - Nach der Installation startet die STABLE-Version neu. Die Testversion öffnest du über das Startmenü: **CARVIS-CORE-TEST**.
+          - Entfernen: Windows-Einstellungen → Apps → CARVIS-CORE-TEST.
+          - Ohne Installation: \`CARVIS-CORE-TEST-${TEST_PV}-portable.exe\`. Web-Paket: \`CARVIS-CORE-TEST-${TEST_PV}-web.zip\`.
+          - Geprüft auf einem GitHub-Windows-Runner und Linux (Browser-Tests, echter KI-Test mit kleinen Ollama-Modellen, Installation neben STABLE). **Nicht** auf deinem PC getestet; Mikrofon und echte Sprachausgabe nicht getestet.
+
+          Quelle: ${SHA}
+          EOF
+          gh release create "$tag" out/* --repo "$QUELLE" --target "$SHA" --draft --prerelease --title "CARVIS CORE ${TEST_PV} (Test ${{ github.run_number }})" --notes-file notes.md
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - name: Dateien sammeln (nur Installer und portable EXE – kein Quellcode)
+        if: env.KANAL != 'test'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force out | Out-Null
@@ -205,12 +302,34 @@ jobs:
           Get-ChildItem out -File | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content -Encoding ascii out/SHA256SUMS.txt
           Get-Content out/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
+        if: env.KANAL != 'test'
         with: { name: windows, path: out/*, retention-days: 7 }
+
+  test-freigeben:
+    name: "TEST: privates Pre-Release sichtbar machen (nur wenn alles grün)"
+    needs: [pruefen, tests, echte-ki, windows]
+    if: always() && needs.pruefen.outputs.kanal == 'test' && needs.windows.outputs.entwurf != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Entwurf veröffentlichen (privat) oder bei Fehlern löschen
+        env:
+          GH_TOKEN: ${{ secrets.TEST_RELEASE_TOKEN }}
+          TAG: ${{ needs.windows.outputs.entwurf }}
+          ALLE: ${{ needs.tests.result == 'success' && needs.echte-ki.result == 'success' && needs.windows.result == 'success' }}
+        run: |
+          if [ "$ALLE" = "true" ]; then
+            gh release edit "$TAG" --repo "$QUELLE" --draft=false --prerelease
+            echo "Privates Test-Release $TAG ist jetzt im Update-Center (Entwicklerkanal) sichtbar."
+          else
+            gh release delete "$TAG" --repo "$QUELLE" --yes --cleanup-tag || true
+            echo "::error::Nicht alle Tests grün (tests=${{ needs.tests.result }}, echte-ki=${{ needs.echte-ki.result }}, windows=${{ needs.windows.result }}) – Test-Release verworfen."
+            exit 1
+          fi
 
   veroeffentlichen:
     name: Veröffentlichen (Website + Release)
     needs: [pruefen, tests, echte-ki, windows]
-    if: needs.pruefen.outputs.bauen == 'ja' && (github.event.inputs.ref || 'main') == 'main' && (github.event_name == 'schedule' || github.event.inputs.veroeffentlichen == 'true')
+    if: needs.pruefen.outputs.bauen == 'ja' && needs.pruefen.outputs.kanal == 'stable' && (github.event.inputs.ref || 'main') == 'main' && (github.event_name == 'schedule' || github.event.inputs.veroeffentlichen == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: write
