@@ -168,6 +168,7 @@ jobs:
           rc=${PIPESTATUS[0]}
           # Fehlgeschlagene Prüfungen als Annotation (lesbar ohne Protokoll-Download)
           grep -E "^(FEHLER|FAIL)" /tmp/ki.log | head -15 | sed 's/^/::error title=Echte KI::/'
+          echo "::notice title=Echte KI::$(grep -cE '^(OK|FEHLER)' /tmp/ki.log) Prüfungen, davon $(grep -c '^FEHLER' /tmp/ki.log) Fehler, Code $rc"
           exit $rc
 
   windows:
@@ -213,7 +214,7 @@ jobs:
           Copy-Item agent-dist/carvis-agent.exe src-tauri/binaries/carvis-agent-x86_64-pc-windows-msvc.exe -Force
           npx --yes @tauri-apps/cli@2 build
       - name: Installierte App testen
-        run: $o = python tools/test-windows-app.py 2>&1 | ForEach-Object { "$_" }; $c = $LASTEXITCODE; $o; $o | Select-String '^(FEHLER|FAIL)' | Select-Object -First 15 | ForEach-Object { "::error title=Windows-App::$_" }; exit $c
+        run: $o = python tools/test-windows-app.py 2>&1 | ForEach-Object { "$_" }; $c = $LASTEXITCODE; $o; $o | Select-String '^(FEHLER|FAIL)' | Select-Object -First 15 | ForEach-Object { "::error title=Windows-App::$_" }; "::notice title=Windows-App::$(($o | Select-String '^(OK|FEHLER)').Count) Prüfungen, Code $c – $($o | Select-Object -Last 1)"; exit $c
       - name: 3.6.7-Installer aus dem privaten Release laden
         shell: pwsh
         env:
@@ -258,12 +259,12 @@ jobs:
       - name: "TEST: portable EXE testen (eigener Datenordner)"
         if: env.KANAL == 'test'
         env: { CARVIS_APP_ID: de.carviscore.app.test }
-        run: $o = python tools/test-portable.py "$env:RUNNER_TEMP/test/portable.exe" 2>&1 | ForEach-Object { "$_" }; $c = $LASTEXITCODE; $o; $o | Select-String '^(FEHLER|FAIL)' | Select-Object -First 15 | ForEach-Object { "::error title=TEST portable::$_" }; exit $c
+        run: $o = python tools/test-portable.py "$env:RUNNER_TEMP/test/portable.exe" 2>&1 | ForEach-Object { "$_" }; $c = $LASTEXITCODE; $o; $o | Select-String '^(FEHLER|FAIL)' | Select-Object -First 15 | ForEach-Object { "::error title=TEST portable::$_" }; "::notice title=TEST portable::$(($o | Select-String '^(OK|FEHLER)').Count) Prüfungen, Code $c – $($o | Select-Object -Last 1)"; exit $c
       - name: "TEST: neben STABLE installieren, starten, entfernen – STABLE-Programm und -Daten bleiben unverändert"
         if: env.KANAL == 'test'
         run: |
           if (-not (Test-Path tools/test-test-channel.py)) { Write-Host "Kein Koexistenz-Test in diesem Stand."; exit 0 }
-          $o = python tools/test-test-channel.py (Get-ChildItem "$env:RUNNER_TEMP/stable/*-setup.exe").FullName (Get-ChildItem "$env:RUNNER_TEMP/test/*-setup.exe").FullName 2>&1 | ForEach-Object { "$_" }; $c = $LASTEXITCODE; $o; $o | Select-String '^(FEHLER|FAIL)' | Select-Object -First 15 | ForEach-Object { "::error title=TEST neben STABLE::$_" }; exit $c
+          $o = python tools/test-test-channel.py (Get-ChildItem "$env:RUNNER_TEMP/stable/*-setup.exe").FullName (Get-ChildItem "$env:RUNNER_TEMP/test/*-setup.exe").FullName 2>&1 | ForEach-Object { "$_" }; $c = $LASTEXITCODE; $o; $o | Select-String '^(FEHLER|FAIL)' | Select-Object -First 15 | ForEach-Object { "::error title=TEST neben STABLE::$_" }; "::notice title=TEST neben STABLE::$(($o | Select-String '^(OK|FEHLER)').Count) Prüfungen, Code $c – $($o | Select-Object -Last 1)"; exit $c
       - name: "TEST: Dateien sammeln (Installer, portable EXE, Web-Paket, Prüfsummen)"
         if: env.KANAL == 'test'
         shell: pwsh
