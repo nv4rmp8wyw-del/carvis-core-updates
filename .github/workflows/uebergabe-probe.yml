@@ -1,0 +1,84 @@
+# Regressionstest für Fehler #47 („bad decrypt“ in test-freigeben): verschlüsselte Übergabe Windows → Linux.
+# Nur Attrappen-Daten und Wegwerf-Schlüssel, KEINE Secrets, KEIN Checkout, kein Projektcode.
+# Läuft (a) als Teil von cc-pipeline.yml vor jeder privaten Freigabe, (b) beim Push auf claude/**-Branches,
+# (c) von Hand. Die Empfänger-Befehle („neu“) sind dieselben wie im Job test-freigeben
+# (abgeglichen durch carvis-core-c/tools/test-pipeline-security.py).
+name: Übergabe-Probe (Windows → Linux, ohne Secrets)
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches: ["claude/**"]
+    paths: [".github/workflows/cc-pipeline.yml", ".github/workflows/uebergabe-probe.yml"]
+permissions:
+  contents: read
+
+jobs:
+  probe-senden:
+    name: "Probe: auf Windows verschlüsseln (alter und neuer Sender)"
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Attrappen-Paket wie im echten Build (PowerShell, SHA256SUMS mit CRLF)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Set-Content -NoNewline -Path out/CARVIS-CORE_4.1.0-test.1_x64-setup.exe -Value "MZ attrappe installer"
+          Set-Content -NoNewline -Path out/CARVIS-CORE-TEST-v1.1.0-portable.exe -Value "MZ attrappe portable"
+          Set-Content -NoNewline -Path out/CARVIS-CORE-TEST-v1.1.0-web.zip -Value "PK attrappe web"
+          Get-ChildItem out -File | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content -Encoding ascii out/SHA256SUMS.txt
+      - name: Wegwerf-Schlüsselpaar und zwei Sender-Varianten
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl version
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out wegwerf.pem 2>/dev/null
+          openssl pkey -in wegwerf.pem -pubout -out pub.pem
+          tar -cf paket.tar -C out .
+          for v in alt neu; do
+            if [ "$v" = alt ]; then openssl rand -hex 32 > k.txt                     # Sender vor dem Fix (#47)
+            else openssl rand -hex 32 | tr -d '\r\n' > k.txt; fi                    # Sender wie in cc-pipeline.yml
+            printf 'Sender %s: Schlüsseldatei %s Bytes, CR enthalten: %s\n' "$v" "$(wc -c < k.txt)" "$(grep -c $'\r' k.txt || true)"
+            openssl enc -aes-256-cbc -pbkdf2 -iter 10000 -salt -pass file:k.txt -in paket.tar -out paket.enc
+            openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in k.txt -out k.enc
+            mkdir -p "probe/$v" && mv paket.enc k.enc "probe/$v/" && rm -f k.txt
+          done
+          mv wegwerf.pem probe/
+      - uses: actions/upload-artifact@v4
+        with: { name: uebergabe-probe, path: probe/, retention-days: 1 }
+
+  probe-empfangen:
+    name: "Probe: auf Linux entschlüsseln und prüfen"
+    needs: probe-senden
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: uebergabe-probe, path: probe }
+      - name: Fälle A/B (neuer Empfänger) müssen gelingen, Fall C (alter Empfänger + alter Sender) muss „bad decrypt“ zeigen
+        run: |
+          set -uo pipefail
+          fails=0
+          neu() {  # $1 = Ordner mit paket.enc/k.enc – Befehle wie in test-freigeben
+            ( set -euo pipefail; cd "$1"; cp ../wegwerf.pem priv.pem
+              openssl pkeyutl -decrypt -inkey priv.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in k.enc -out k.raw 2>/dev/null || exit 12
+              tr -d '\r\n' < k.raw > k.txt
+              grep -Eq '^[0-9a-f]{64}$' k.txt || exit 13
+              openssl enc -d -aes-256-cbc -pbkdf2 -iter 10000 -pass file:k.txt -in paket.enc -out paket.tar 2>/dev/null || exit 14
+              rm -rf out && mkdir out && tar -xf paket.tar -C out --no-same-owner
+              sed -i 's/\r$//' out/SHA256SUMS.txt
+              grep -v ' SHA256SUMS\.txt$' out/SHA256SUMS.txt > sums.chk
+              (cd out && sha256sum -c --quiet ../sums.chk) || exit 15 )
+          }
+          alt() {  # Empfänger vor dem Fix
+            ( set -euo pipefail; cd "$1"; cp ../wegwerf.pem priv.pem
+              openssl pkeyutl -decrypt -inkey priv.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in k.enc -out k.txt
+              openssl enc -d -aes-256-cbc -pbkdf2 -iter 10000 -pass file:k.txt -in paket.enc -out paket.tar 2> fehler.txt; r=$?
+              cat fehler.txt | head -1; exit $r )
+          }
+          erwarte() { if [ "$1" = "$2" ]; then echo "OK      $3"; echo "::notice title=Übergabe-Probe::OK – $3"; else echo "FEHLER  $3 (erwartet $1, war $2)"; echo "::error title=Übergabe-Probe::$3 (erwartet $1, war $2)"; fails=$((fails+1)); fi; }
+          neu probe/neu; erwarte 0 $? "B: neuer Sender → neuer Empfänger: entschlüsselt, SHA-256 korrekt"
+          neu probe/alt; erwarte 0 $? "A: alter Windows-Sender (CRLF) → neuer Empfänger: entschlüsselt (robust)"
+          out=$(alt probe/alt); r=$?
+          [ $r -ne 0 ] && echo "$out" | grep -q "bad decrypt"; erwarte 0 $? "C: alter Sender → alter Empfänger: „bad decrypt“ (Ursache von #47 nachgewiesen)"
+          exit $fails
