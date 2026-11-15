@@ -16,7 +16,7 @@
 #
 # TEST-Kanal (Inhaber 15.11.2026, D-048): nächste Version PRIVAT bauen und testen, ohne öffentliche Dateien.
 #   - automatisch um :10/:30/:50 (Zweig vars.TEST_ZWEIG, Standard feature/v1.1) oder von Hand mit kanal=test
-#   - gebaut mit eigener Kennung de.carviscore.app.test / Name CARVIS-CORE-TEST (überschreibt STABLE nie)
+#   - gebaut mit eigener Kennung de.carviscore.app.test / Name „CARVIS CORE TEST“ (überschreibt STABLE nie)
 #   - KEIN öffentliches Artefakt, KEINE Website, KEIN öffentliches Release. Installer, portable EXE, Web-Paket und
 #     Prüfsummen gehen nur als Pre-Release v<Version>-test.<Lauf> in das PRIVATE Repo; zuerst als Entwurf, erst nach
 #     allen grünen Tests sichtbar (sonst gelöscht). Das Update-Center (Entwicklerkanal, GitHub-Anmeldung) bietet es an.
@@ -290,12 +290,18 @@ jobs:
           Copy-Item src-tauri/target/release/bundle/nsis/*-setup.exe "$env:RUNNER_TEMP/stable/"
           $v = (Select-String -Path js/version.js -Pattern "VERSION = '([^']+)'").Matches[0].Groups[1].Value
           $m = [int]$v.Split('.')[0]; $pv = if ($m -ge 4) { "v$($m - 3)." + ($v -replace '^\d+\.', '') } else { $v }
-          python -c "import json,sys; p='src-tauri/tauri.conf.json'; c=json.load(open(p,encoding='utf-8')); c['identifier']='de.carviscore.app.test'; c['productName']='CARVIS-CORE-TEST'; [w.update(title=sys.argv[1]) for w in c.get('app',{}).get('windows',[])]; json.dump(c,open(p,'w',encoding='utf-8'),indent=2,ensure_ascii=False)" "CARVIS CORE $pv (Test)"
+          # Testnummer = Laufnummer (wie im Tag v<Version>-test.<Lauf>): App, Installer, Agent und Oberfläche kennen ihren Testbuild,
+          # damit das Update-Center der Testversion neuere Testbuilds erkennt
+          python tools/stamp-build.py ${{ github.run_number }}
+          python tools/make-dist.py
+          pyinstaller --noconfirm --onefile --name carvis-agent --distpath agent-dist tools/desktop-agent.py
+          Copy-Item agent-dist/carvis-agent.exe src-tauri/binaries/carvis-agent-x86_64-pc-windows-msvc.exe -Force
+          python -c "import json,sys; p='src-tauri/tauri.conf.json'; c=json.load(open(p,encoding='utf-8')); c['identifier']='de.carviscore.app.test'; c['productName']='CARVIS CORE TEST'; [w.update(title=sys.argv[1]) for w in c.get('app',{}).get('windows',[])]; json.dump(c,open(p,'w',encoding='utf-8'),indent=2,ensure_ascii=False)" "CARVIS CORE $pv (Test)"
           $env:CARVIS_APP_ID = 'de.carviscore.app.test'
           Remove-Item src-tauri/target/release/bundle/nsis/*-setup.exe -Force
           npx --yes @tauri-apps/cli@2 build
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/test" | Out-Null
-          Copy-Item src-tauri/target/release/bundle/nsis/CARVIS-CORE-TEST_*-setup.exe "$env:RUNNER_TEMP/test/"
+          Copy-Item src-tauri/target/release/bundle/nsis/CARVIS CORE TEST_*-setup.exe "$env:RUNNER_TEMP/test/"
           $env:CARVIS_AGENT_EXE = (Resolve-Path agent-dist/carvis-agent.exe).Path
           npx --yes @tauri-apps/cli@2 build --no-bundle --features portable
           Copy-Item src-tauri/target/release/carvis-core.exe "$env:RUNNER_TEMP/test/portable.exe" -Force
@@ -316,7 +322,7 @@ jobs:
         run: |
           $n = "${{ github.run_number }}"
           New-Item -ItemType Directory -Force out | Out-Null
-          # Name passend zum Update-Center ab v1.0 (CARVIS-CORE_<Version>_x64-setup.exe); Inhalt ist die separate App CARVIS-CORE-TEST
+          # Name passend zum Update-Center ab v1.0 (CARVIS-CORE_<Version>_x64-setup.exe); Inhalt ist die separate App „CARVIS CORE TEST“
           Copy-Item (Get-ChildItem "$env:RUNNER_TEMP/test/*-setup.exe").FullName "out/CARVIS-CORE_$($env:TEST_V)-test.$($n)_x64-setup.exe"
           Copy-Item "$env:RUNNER_TEMP/test/portable.exe" "out/CARVIS-CORE-TEST-$($env:TEST_PV)-portable.exe"
           Compress-Archive -Path dist/* -DestinationPath "out/CARVIS-CORE-TEST-$($env:TEST_PV)-web.zip"
@@ -331,7 +337,7 @@ jobs:
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out t.pem 2>/dev/null
           openssl pkey -in t.pem -pubout -out tp.pem
           printf 'attrappe' > a.txt; tar -cf a.tar a.txt
-          openssl rand -hex 32 > k.txt
+          openssl rand -hex 32 | tr -d '\r\n' > k.txt
           openssl enc -aes-256-cbc -pbkdf2 -iter 10000 -salt -pass file:k.txt -in a.tar -out a.enc
           openssl pkeyutl -encrypt -pubin -inkey tp.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in k.txt -out k.enc
           openssl pkeyutl -decrypt -inkey t.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in k.enc -out k2.txt
@@ -349,7 +355,10 @@ jobs:
           umask 077
           echo "$PUB" | base64 -d > pub.pem
           tar -cf paket.tar -C out .
-          openssl rand -hex 32 > k.txt
+          # Ohne Zeilenende: das Windows-openssl schreibt Text mit CRLF und liest „file:“ im Textmodus, Linux liest binär
+          # (Fehler #47 „bad decrypt“). Darum nur die 64 Hex-Zeichen, auf beiden Seiten gleich.
+          openssl rand -hex 32 | tr -d '\r\n' > k.txt
+          [ "$(wc -c < k.txt)" = 64 ] || { echo "::error::Übergabeschlüssel hat nicht 64 Zeichen"; exit 1; }
           openssl enc -aes-256-cbc -pbkdf2 -iter 10000 -salt -pass file:k.txt -in paket.tar -out paket.enc
           openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in k.txt -out k.enc
           rm -f k.txt paket.tar pub.pem
@@ -371,11 +380,17 @@ jobs:
         if: env.KANAL != 'test'
         with: { name: windows, path: out/*, retention-days: 7 }
 
+  uebergabe-probe:
+    name: "TEST: Übergabe-Probe Windows → Linux (Regressionstest #47, ohne Secrets)"
+    needs: pruefen
+    if: needs.pruefen.outputs.bauen == 'ja' && needs.pruefen.outputs.kanal == 'test'
+    uses: ./.github/workflows/uebergabe-probe.yml
+
   test-freigeben:
     name: "TEST: privates Pre-Release anlegen (nur wenn alle Tests grün; ohne Projektcode)"
     # Secret liegt in der GitHub-Umgebung „test-freigabe“ (nur von main, siehe docs/TEST-KANAL.md) – andere Jobs sehen es nicht
     environment: test-freigabe
-    needs: [pruefen, schluessel, tests, echte-ki, windows]
+    needs: [pruefen, schluessel, tests, echte-ki, windows, uebergabe-probe]
     # Ohne always()/failure(): läuft nur, wenn ALLE benötigten Jobs erfolgreich waren
     if: needs.pruefen.outputs.kanal == 'test' && needs.schluessel.outputs.aktiv == 'ja'
     runs-on: ubuntu-latest
@@ -395,10 +410,16 @@ jobs:
           umask 077
           pass=$(printf 'cc-test-uebergabe|%s|%s' "$LAUF" "$TOKEN" | sha256sum | cut -d' ' -f1)
           echo "::add-mask::$pass"
-          PASS="$pass" openssl enc -d -aes-256-cbc -pbkdf2 -iter 300000 -pass env:PASS -in k/schluessel.enc -out priv.pem
-          openssl pkeyutl -decrypt -inkey priv.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in p/k.enc -out k.txt
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 10000 -pass file:k.txt -in p/paket.enc -out paket.tar
-          rm -f priv.pem k.txt
+          PASS="$pass" openssl enc -d -aes-256-cbc -pbkdf2 -iter 300000 -pass env:PASS -in k/schluessel.enc -out priv.pem 2>/dev/null \
+            || { echo "::error::Schritt 1/3: privater Einweg-Schlüssel nicht entschlüsselbar (anderer Schreibschlüssel oder andere Lauf-ID als im Job schluessel)"; exit 1; }
+          openssl pkeyutl -decrypt -inkey priv.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in p/k.enc -out k.raw 2>/dev/null \
+            || { echo "::error::Schritt 2/3: Übergabeschlüssel nicht entschlüsselbar (Paket gehört nicht zu diesem Lauf)"; exit 1; }
+          # Zeilenenden entfernen (ältere Windows-Sender schrieben CRLF, Fehler #47) und Format prüfen
+          tr -d '\r\n' < k.raw > k.txt
+          grep -Eq '^[0-9a-f]{64}$' k.txt || { echo "::error::Schritt 2/3: Übergabeschlüssel hat ein unerwartetes Format"; exit 1; }
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 10000 -pass file:k.txt -in p/paket.enc -out paket.tar 2>/dev/null \
+            || { echo "::error::Schritt 3/3: Paket nicht entschlüsselbar"; exit 1; }
+          rm -f priv.pem k.raw k.txt
           # Nur flache, erwartete Dateinamen (keine Pfade, keine fremden Dateien)
           erlaubt='^\./$|^\./(CARVIS-CORE_[0-9]+\.[0-9]+\.[0-9]+-test\.[0-9]+_x64-setup\.exe|CARVIS-CORE-TEST-v[0-9.]+-portable\.exe|CARVIS-CORE-TEST-v[0-9.]+-web\.zip|SHA256SUMS\.txt)$'
           if tar -tf paket.tar | grep -Ev "$erlaubt"; then echo "::error::Unerwartete Datei im Paket – abgebrochen."; exit 1; fi
@@ -426,9 +447,10 @@ jobs:
           cat > notes.md <<EOF
           **CARVIS CORE ${PV} – TESTVERSION (privat, nicht freigegeben)**
 
-          - Installiert die **separate App „CARVIS-CORE-TEST“** (eigener Ordner, eigene Daten). Deine STABLE-Version und ihre Daten bleiben unverändert.
-          - Nach der Installation startet die STABLE-Version neu. Die Testversion öffnest du über das Startmenü: **CARVIS-CORE-TEST**.
-          - Entfernen: Windows-Einstellungen → Apps → CARVIS-CORE-TEST.
+          - Installiert die **separate App „CARVIS CORE TEST“** (eigener Ordner, eigene Daten, eigener Agent). Deine STABLE-Version und ihre Daten bleiben unverändert.
+          - Die Testversion öffnest du über das Startmenü: **CARVIS CORE TEST**. Beide Versionen können gleichzeitig laufen.
+          - Updates der Testversion kommen nur über den privaten Testkanal (Updates → Entwicklerkanal in der Testversion).
+          - Entfernen: Windows-Einstellungen → Apps → CARVIS CORE TEST (STABLE bleibt erhalten).
           - Ohne Installation: \`CARVIS-CORE-TEST-${PV}-portable.exe\`. Web-Paket: \`CARVIS-CORE-TEST-${PV}-web.zip\`.
           - Freigeschaltet, weil alle Tests grün waren: Browser-Tests, echter KI-Test mit kleinen Ollama-Modellen (Linux-Runner), Windows-Installation neben STABLE (Windows-Runner). **Nicht** auf deinem PC getestet; Mikrofon und echte Sprachausgabe nicht getestet.
 
