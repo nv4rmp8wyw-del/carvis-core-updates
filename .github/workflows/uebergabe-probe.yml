@@ -31,20 +31,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          trap 'echo "::error title=Probe-Sender::Abbruch in Zeile $LINENO (Code $?): $BASH_COMMAND"' ERR
-          echo "::notice title=Probe-Sender::$(openssl version) · $(command -v openssl) · $(bash --version | head -1)"
-          openssl version
+          letzt=start
+          trap 'letzt=$BASH_COMMAND' DEBUG
+          trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "::error title=Probe-Sender::Code $rc nach: $letzt"; fi' EXIT
+          echo "::notice title=Probe-Sender::$(openssl version) / $(command -v openssl)"
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out wegwerf.pem 2>/dev/null
           openssl pkey -in wegwerf.pem -pubout -out pub.pem
           tar -cf paket.tar -C out .
+          mkdir -p probe/alt probe/neu
+          # Sender vor dem Fix (#47)
+          openssl rand -hex 32 > k_alt.txt
+          # Sender wie in cc-pipeline.yml
+          openssl rand -hex 32 | tr -d '\r\n' > k_neu.txt
           for v in alt neu; do
-            if [ "$v" = alt ]; then openssl rand -hex 32 > k.txt                     # Sender vor dem Fix (#47)
-            else openssl rand -hex 32 | tr -d '\r\n' > k.txt; fi                    # Sender wie in cc-pipeline.yml
-            echo "::notice title=Übergabe-Probe Sender $v::Schlüsseldatei $(wc -c < k.txt) Bytes, Zeilen mit CR: $(grep -c $'\r' k.txt || true)"
-            openssl enc -aes-256-cbc -pbkdf2 -iter 10000 -salt -pass file:k.txt -in paket.tar -out paket.enc
-            openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in k.txt -out k.enc
-            mkdir -p "probe/$v" && mv paket.enc k.enc "probe/$v/" && rm -f k.txt
+            bytes=$(wc -c < "k_$v.txt")
+            crs=$(tr -dc '\r' < "k_$v.txt" | wc -c)
+            echo "::notice title=Probe-Sender $v::Schlüsseldatei $bytes Bytes, davon CR: $crs"
+            openssl enc -aes-256-cbc -pbkdf2 -iter 10000 -salt -pass "file:k_$v.txt" -in paket.tar -out "probe/$v/paket.enc"
+            openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "k_$v.txt" -out "probe/$v/k.enc"
           done
+          rm -f k_alt.txt k_neu.txt
           mv wegwerf.pem probe/
       - uses: actions/upload-artifact@v4
         with: { name: uebergabe-probe, path: probe/, retention-days: 1 }
