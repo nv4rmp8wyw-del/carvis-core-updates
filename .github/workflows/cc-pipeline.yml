@@ -182,6 +182,8 @@ jobs:
 
   schluessel:
     name: "TEST: Einweg-Schlüssel für die verschlüsselte Übergabe (ohne Projektcode)"
+    # Secret liegt in der GitHub-Umgebung „test-freigabe“ (nur von main, siehe docs/TEST-KANAL.md) – andere Jobs sehen es nicht
+    environment: test-freigabe
     needs: pruefen
     if: needs.pruefen.outputs.bauen == 'ja' && needs.pruefen.outputs.kanal == 'test'
     runs-on: ubuntu-latest
@@ -371,6 +373,8 @@ jobs:
 
   test-freigeben:
     name: "TEST: privates Pre-Release anlegen (nur wenn alle Tests grün; ohne Projektcode)"
+    # Secret liegt in der GitHub-Umgebung „test-freigabe“ (nur von main, siehe docs/TEST-KANAL.md) – andere Jobs sehen es nicht
+    environment: test-freigabe
     needs: [pruefen, schluessel, tests, echte-ki, windows]
     # Ohne always()/failure(): läuft nur, wenn ALLE benötigten Jobs erfolgreich waren
     if: needs.pruefen.outputs.kanal == 'test' && needs.schluessel.outputs.aktiv == 'ja'
