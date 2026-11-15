@@ -86,9 +86,13 @@ jobs:
               head -1 fehler.txt; exit $r )
           }
           erwarte() { if [ "$1" = "$2" ]; then echo "OK      $3"; echo "::notice title=Übergabe-Probe::OK – $3"; else echo "FEHLER  $3 (erwartet $1, war $2)"; echo "::error title=Übergabe-Probe::$3 (erwartet $1, war $2)"; fails=$((fails+1)); fi; }
+          set +e
+          # Fall C zuerst und in einer eigenen Kopie (die anderen Fälle legen Dateien im Ordner an)
+          cp -r probe/alt probe/alt-c
+          alt probe/alt-c > c.txt 2>&1; rc_c=$?
+          grep -q "bad decrypt" c.txt; bad=$?
+          echo "::notice title=Fall C::alter Empfaenger, Code $rc_c, bad decrypt gefunden: $([ $bad -eq 0 ] && echo ja || echo nein)"
+          [ $rc_c -ne 0 ] && [ $bad -eq 0 ]; erwarte 0 $? "C: alter Sender → alter Empfänger: „bad decrypt“ (Ursache von #47 nachgewiesen)"
           neu probe/neu; erwarte 0 $? "B: neuer Sender → neuer Empfänger: entschlüsselt, SHA-256 korrekt"
           neu probe/alt; erwarte 0 $? "A: alter Windows-Sender (CRLF) → neuer Empfänger: entschlüsselt (robust)"
-          out=$(alt probe/alt); r=$?
-          echo "::notice title=Übergabe-Probe Fall C::Code $r – $(echo "$out" | tr '\n' ' ' | cut -c1-160)"
-          [ $r -ne 0 ] && echo "$out" | grep -q "bad decrypt"; erwarte 0 $? "C: alter Sender → alter Empfänger: „bad decrypt“ (Ursache von #47 nachgewiesen)"
           exit $fails
