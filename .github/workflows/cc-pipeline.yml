@@ -130,7 +130,12 @@ jobs:
           sleep 2
           liste=$(grep -oP 'for t in \K[^;]+(?=; do)' .github/workflows/ci.yml | head -1)
           [ -n "$liste" ] || { echo "Testliste in ci.yml nicht gefunden"; exit 1; }
-          for t in $liste; do echo "::group::$t"; node tools/$t.js; echo "::endgroup::"; done
+          for t in $liste; do
+            echo "::group::$t"
+            node tools/$t.js 2>&1 | tee /tmp/t.log; rc=${PIPESTATUS[0]}
+            echo "::endgroup::"
+            if [ $rc -ne 0 ]; then grep -E "^(FEHLER|FAIL)" /tmp/t.log | head -15 | sed "s/^/::error title=$t::/"; exit $rc; fi
+          done
 
   echte-ki:
     name: Echte KI (Ollama, kein Mock)
@@ -158,7 +163,12 @@ jobs:
           if [ ! -f tools/v391-real-ollama-test.js ]; then echo "Kein Echt-KI-Test in diesem Stand."; exit 0; fi
           python3 tools/dev-server.py > /tmp/dev.log 2>&1 &
           sleep 2
-          node tools/v391-real-ollama-test.js
+          set +e
+          node tools/v391-real-ollama-test.js 2>&1 | tee /tmp/ki.log
+          rc=${PIPESTATUS[0]}
+          # Fehlgeschlagene Prüfungen als Annotation (lesbar ohne Protokoll-Download)
+          grep -E "^(FEHLER|FAIL)" /tmp/ki.log | head -15 | sed 's/^/::error title=Echte KI::/'
+          exit $rc
 
   windows:
     name: Windows (bauen, installieren, testen)
@@ -203,7 +213,7 @@ jobs:
           Copy-Item agent-dist/carvis-agent.exe src-tauri/binaries/carvis-agent-x86_64-pc-windows-msvc.exe -Force
           npx --yes @tauri-apps/cli@2 build
       - name: Installierte App testen
-        run: python tools/test-windows-app.py
+        run: $o = python tools/test-windows-app.py 2>&1 | ForEach-Object { "$_" }; $c = $LASTEXITCODE; $o; $o | Select-String '^(FEHLER|FAIL)' | Select-Object -First 15 | ForEach-Object { "::error title=Windows-App::$_" }; exit $c
       - name: 3.6.7-Installer aus dem privaten Release laden
         shell: pwsh
         env:
@@ -248,12 +258,12 @@ jobs:
       - name: "TEST: portable EXE testen (eigener Datenordner)"
         if: env.KANAL == 'test'
         env: { CARVIS_APP_ID: de.carviscore.app.test }
-        run: python tools/test-portable.py "$env:RUNNER_TEMP/test/portable.exe"
+        run: $o = python tools/test-portable.py "$env:RUNNER_TEMP/test/portable.exe" 2>&1 | ForEach-Object { "$_" }; $c = $LASTEXITCODE; $o; $o | Select-String '^(FEHLER|FAIL)' | Select-Object -First 15 | ForEach-Object { "::error title=TEST portable::$_" }; exit $c
       - name: "TEST: neben STABLE installieren, starten, entfernen – STABLE-Programm und -Daten bleiben unverändert"
         if: env.KANAL == 'test'
         run: |
           if (-not (Test-Path tools/test-test-channel.py)) { Write-Host "Kein Koexistenz-Test in diesem Stand."; exit 0 }
-          python tools/test-test-channel.py (Get-ChildItem "$env:RUNNER_TEMP/stable/*-setup.exe").FullName (Get-ChildItem "$env:RUNNER_TEMP/test/*-setup.exe").FullName
+          $o = python tools/test-test-channel.py (Get-ChildItem "$env:RUNNER_TEMP/stable/*-setup.exe").FullName (Get-ChildItem "$env:RUNNER_TEMP/test/*-setup.exe").FullName 2>&1 | ForEach-Object { "$_" }; $c = $LASTEXITCODE; $o; $o | Select-String '^(FEHLER|FAIL)' | Select-Object -First 15 | ForEach-Object { "::error title=TEST neben STABLE::$_" }; exit $c
       - name: "TEST: Dateien sammeln (Installer, portable EXE, Web-Paket, Prüfsummen)"
         if: env.KANAL == 'test'
         shell: pwsh
