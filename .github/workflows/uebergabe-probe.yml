@@ -38,7 +38,7 @@ jobs:
           for v in alt neu; do
             if [ "$v" = alt ]; then openssl rand -hex 32 > k.txt                     # Sender vor dem Fix (#47)
             else openssl rand -hex 32 | tr -d '\r\n' > k.txt; fi                    # Sender wie in cc-pipeline.yml
-            printf 'Sender %s: Schlüsseldatei %s Bytes, CR enthalten: %s\n' "$v" "$(wc -c < k.txt)" "$(grep -c $'\r' k.txt || true)"
+            echo "::notice title=Übergabe-Probe Sender $v::Schlüsseldatei $(wc -c < k.txt) Bytes, Zeilen mit CR: $(grep -c $'\r' k.txt || true)"
             openssl enc -aes-256-cbc -pbkdf2 -iter 10000 -salt -pass file:k.txt -in paket.tar -out paket.enc
             openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in k.txt -out k.enc
             mkdir -p "probe/$v" && mv paket.enc k.enc "probe/$v/" && rm -f k.txt
@@ -71,14 +71,16 @@ jobs:
               (cd out && sha256sum -c --quiet ../sums.chk) || exit 15 )
           }
           alt() {  # Empfänger vor dem Fix
-            ( set -euo pipefail; cd "$1"; cp ../wegwerf.pem priv.pem
-              openssl pkeyutl -decrypt -inkey priv.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in k.enc -out k.txt
+            ( cd "$1"; cp ../wegwerf.pem priv.pem
+              openssl pkeyutl -decrypt -inkey priv.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in k.enc -out k.txt || exit 12
+              echo "Empfangene Schlüsseldatei: $(wc -c < k.txt) Bytes"
               openssl enc -d -aes-256-cbc -pbkdf2 -iter 10000 -pass file:k.txt -in paket.enc -out paket.tar 2> fehler.txt; r=$?
-              cat fehler.txt | head -1; exit $r )
+              head -1 fehler.txt; exit $r )
           }
           erwarte() { if [ "$1" = "$2" ]; then echo "OK      $3"; echo "::notice title=Übergabe-Probe::OK – $3"; else echo "FEHLER  $3 (erwartet $1, war $2)"; echo "::error title=Übergabe-Probe::$3 (erwartet $1, war $2)"; fails=$((fails+1)); fi; }
           neu probe/neu; erwarte 0 $? "B: neuer Sender → neuer Empfänger: entschlüsselt, SHA-256 korrekt"
           neu probe/alt; erwarte 0 $? "A: alter Windows-Sender (CRLF) → neuer Empfänger: entschlüsselt (robust)"
           out=$(alt probe/alt); r=$?
+          echo "::notice title=Übergabe-Probe Fall C::Code $r – $(echo "$out" | tr '\n' ' ' | cut -c1-160)"
           [ $r -ne 0 ] && echo "$out" | grep -q "bad decrypt"; erwarte 0 $? "C: alter Sender → alter Empfänger: „bad decrypt“ (Ursache von #47 nachgewiesen)"
           exit $fails
