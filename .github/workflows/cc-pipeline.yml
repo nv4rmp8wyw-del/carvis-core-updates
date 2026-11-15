@@ -301,7 +301,7 @@ jobs:
           Remove-Item src-tauri/target/release/bundle/nsis/*-setup.exe -Force
           npx --yes @tauri-apps/cli@2 build
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/test" | Out-Null
-          Copy-Item src-tauri/target/release/bundle/nsis/CARVIS CORE TEST_*-setup.exe "$env:RUNNER_TEMP/test/"
+          Copy-Item -Path 'src-tauri/target/release/bundle/nsis/CARVIS CORE TEST_*-setup.exe' -Destination "$env:RUNNER_TEMP/test/"
           $env:CARVIS_AGENT_EXE = (Resolve-Path agent-dist/carvis-agent.exe).Path
           npx --yes @tauri-apps/cli@2 build --no-bundle --features portable
           Copy-Item src-tauri/target/release/carvis-core.exe "$env:RUNNER_TEMP/test/portable.exe" -Force
