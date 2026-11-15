@@ -31,6 +31,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          trap 'echo "::error title=Probe-Sender::Abbruch in Zeile $LINENO (Code $?): $BASH_COMMAND"' ERR
+          echo "::notice title=Probe-Sender::$(openssl version) · $(command -v openssl) · $(bash --version | head -1)"
           openssl version
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out wegwerf.pem 2>/dev/null
           openssl pkey -in wegwerf.pem -pubout -out pub.pem
