@@ -168,6 +168,7 @@ jobs:
           rc=${PIPESTATUS[0]}
           # Fehlgeschlagene Prüfungen als Annotation (lesbar ohne Protokoll-Download)
           grep -E "^(FEHLER|FAIL)" /tmp/ki.log | head -15 | sed 's/^/::error title=Echte KI::/'
+          grep -E "^HINWEIS" /tmp/ki.log | head -10 | sed 's/^/::notice title=Echte KI::/'
           echo "::notice title=Echte KI::$(grep -cE '^(OK|FEHLER)' /tmp/ki.log) Prüfungen, davon $(grep -c '^FEHLER' /tmp/ki.log) Fehler, Code $rc"
           exit $rc
 
