@@ -289,14 +289,15 @@ jobs:
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/stable" | Out-Null
           Copy-Item src-tauri/target/release/bundle/nsis/*-setup.exe "$env:RUNNER_TEMP/stable/"
           $v = (Select-String -Path js/version.js -Pattern "VERSION = '([^']+)'").Matches[0].Groups[1].Value
-          $m = [int]$v.Split('.')[0]; $pv = if ($m -ge 4) { "v$($m - 3)." + ($v -replace '^\d+\.', '') } else { $v }
+          # Sichtbare Produktversion wie displayVersion() in js/version.js (D-051): 4.1.0 -> v1.1, 4.1.2 -> v1.1.2
+          $p = $v.Split('.'); $m = [int]$p[0]; $pv = if ($m -ge 4) { "v$($m - 3).$($p[1])" + $(if ([int]$p[2]) { ".$($p[2])" } else { '' }) } else { $v }
           # Testnummer = Laufnummer (wie im Tag v<Version>-test.<Lauf>): App, Installer, Agent und Oberfläche kennen ihren Testbuild,
           # damit das Update-Center der Testversion neuere Testbuilds erkennt
           python tools/stamp-build.py ${{ github.run_number }}
           python tools/make-dist.py
           pyinstaller --noconfirm --onefile --name carvis-agent --distpath agent-dist tools/desktop-agent.py
           Copy-Item agent-dist/carvis-agent.exe src-tauri/binaries/carvis-agent-x86_64-pc-windows-msvc.exe -Force
-          python -c "import json,sys; p='src-tauri/tauri.conf.json'; c=json.load(open(p,encoding='utf-8')); c['identifier']='de.carviscore.app.test'; c['productName']='CARVIS CORE TEST'; [w.update(title=sys.argv[1]) for w in c.get('app',{}).get('windows',[])]; json.dump(c,open(p,'w',encoding='utf-8'),indent=2,ensure_ascii=False)" "CARVIS CORE $pv (Test)"
+          python -c "import json,sys; p='src-tauri/tauri.conf.json'; c=json.load(open(p,encoding='utf-8')); c['identifier']='de.carviscore.app.test'; c['productName']='CARVIS CORE TEST'; [w.update(title=sys.argv[1]) for w in c.get('app',{}).get('windows',[])]; json.dump(c,open(p,'w',encoding='utf-8'),indent=2,ensure_ascii=False)" "CARVIS CORE $pv TEST"
           $env:CARVIS_APP_ID = 'de.carviscore.app.test'
           Remove-Item src-tauri/target/release/bundle/nsis/*-setup.exe -Force
           npx --yes @tauri-apps/cli@2 build
@@ -432,7 +433,7 @@ jobs:
           (cd out && sha256sum -c ../sums.chk)
           inst=$(ls out | grep -E '_x64-setup\.exe$')
           v=$(echo "$inst" | sed -E 's/^CARVIS-CORE_([0-9]+\.[0-9]+\.[0-9]+)-test\.[0-9]+_x64-setup\.exe$/\1/')
-          m=${v%%.*}; pv=$([ "$m" -ge 4 ] && echo "v$((m-3)).${v#*.}" || echo "$v")
+          IFS=. read -r m mi pa <<< "$v"; pv=$([ "$m" -ge 4 ] && echo "v$((m-3)).${mi}$([ "$pa" != 0 ] && echo ".$pa")" || echo "$v")
           echo "v=$v" >> "$GITHUB_OUTPUT"; echo "pv=$pv" >> "$GITHUB_OUTPUT"
       - name: Privates Pre-Release anlegen (erst Entwurf, nach vollständigem Hochladen sichtbar)
         env:
@@ -445,7 +446,7 @@ jobs:
           set -euo pipefail
           tag="v${V}-test.${N}"
           cat > notes.md <<EOF
-          **CARVIS CORE ${PV} – TESTVERSION (privat, nicht freigegeben)**
+          **CARVIS CORE ${PV} TEST – Testbuild ${N} (privat, nicht freigegeben)**
 
           - Installiert die **separate App „CARVIS CORE TEST“** (eigener Ordner, eigene Daten, eigener Agent). Deine STABLE-Version und ihre Daten bleiben unverändert.
           - Die Testversion öffnest du über das Startmenü: **CARVIS CORE TEST**. Beide Versionen können gleichzeitig laufen.
@@ -454,9 +455,10 @@ jobs:
           - Ohne Installation: \`CARVIS-CORE-TEST-${PV}-portable.exe\`. Web-Paket: \`CARVIS-CORE-TEST-${PV}-web.zip\`.
           - Freigeschaltet, weil alle Tests grün waren: Browser-Tests, echter KI-Test mit kleinen Ollama-Modellen (Linux-Runner), Windows-Installation neben STABLE (Windows-Runner). **Nicht** auf deinem PC getestet; Mikrofon und echte Sprachausgabe nicht getestet.
 
+          Technisch (für Updater und Diagnose): Build ${V}-test.${N}
           Quelle: ${SHA}
           EOF
-          gh release create "$tag" out/* --repo "$QUELLE" --target "$SHA" --draft --prerelease --title "CARVIS CORE ${PV} (Test ${N})" --notes-file notes.md
+          gh release create "$tag" out/* --repo "$QUELLE" --target "$SHA" --draft --prerelease --title "CARVIS CORE ${PV} TEST (Testbuild ${N})" --notes-file notes.md
           if ! gh release edit "$tag" --repo "$QUELLE" --draft=false --prerelease; then
             gh release delete "$tag" --repo "$QUELLE" --yes --cleanup-tag || true
             echo "::error::Freischalten fehlgeschlagen – Entwurf gelöscht."; exit 1
@@ -486,7 +488,7 @@ jobs:
           frei=nein
           [ "$f" = "$v" ] && frei=ja || echo "::warning::$v ist nicht freigegeben (.github/release-freigabe.txt: '${f:-leer}') – nichts veröffentlicht."
           # Produktversion für den Release-Titel (D-046): Build 4.x.y = CARVIS CORE v1.x.y
-          m=${v%%.*}; if [ "$m" -ge 4 ]; then label="CARVIS CORE v$((m-3)).${v#*.} (Build $v)"; else label="CARVIS CORE $v"; fi
+          IFS=. read -r m mi pa <<< "$v"; if [ "$m" -ge 4 ]; then label="CARVIS CORE v$((m-3)).${mi}$([ "$pa" != 0 ] && echo ".$pa")"; else label="CARVIS CORE $v"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"; echo "frei=$frei" >> "$GITHUB_OUTPUT"; echo "label=$label" >> "$GITHUB_OUTPUT"
       - name: Web-App zusammenstellen
         if: steps.v.outputs.frei == 'ja'
@@ -522,7 +524,7 @@ jobs:
         run: |
           if gh release view "v$V" --repo "${{ github.repository }}" >/dev/null 2>&1; then echo "Release v$V existiert bereits."; exit 0; fi
           cat > notes.md <<EOF
-          CARVIS CORE $V für Windows (x64).
+          ${{ steps.v.outputs.label }} für Windows (x64). Technischer Build: $V.
 
           - **Installer:** \`CARVIS-CORE_${V}_x64-setup.exe\` – installieren und starten.
           - **Portable:** \`CARVIS-CORE.exe\` – ohne Installation starten.
