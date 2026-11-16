@@ -16,7 +16,7 @@
 #
 # TEST-Kanal (Inhaber 15.11.2026, D-048): nächste Version PRIVAT bauen und testen, ohne öffentliche Dateien.
 #   - automatisch um :10/:30/:50 (Zweig vars.TEST_ZWEIG, Standard feature/v1.1) oder von Hand mit kanal=test
-#   - gebaut mit eigener Kennung de.carviscore.app.test / Name „CARVIS CORE TEST“ (überschreibt STABLE nie)
+#   - gebaut mit eigener Kennung de.carviscore.app.test (oder je Version aus src-tauri/test-identifier.txt) / Name „CARVIS CORE TEST“ (überschreibt STABLE nie)
 #   - KEIN öffentliches Artefakt, KEINE Website, KEIN öffentliches Release. Installer, portable EXE, Web-Paket und
 #     Prüfsummen gehen nur als Pre-Release v<Version>-test.<Lauf> in das PRIVATE Repo; zuerst als Entwurf, erst nach
 #     allen grünen Tests sichtbar (sonst gelöscht). Das Update-Center (Entwicklerkanal, GitHub-Anmeldung) bietet es an.
@@ -321,8 +321,15 @@ jobs:
           python tools/make-dist.py
           pyinstaller --noconfirm --onefile --name carvis-agent --distpath agent-dist tools/desktop-agent.py
           Copy-Item agent-dist/carvis-agent.exe src-tauri/binaries/carvis-agent-x86_64-pc-windows-msvc.exe -Force
-          python -c "import json,sys; p='src-tauri/tauri.conf.json'; c=json.load(open(p,encoding='utf-8')); c['identifier']='de.carviscore.app.test'; c['productName']='CARVIS CORE TEST'; [w.update(title=sys.argv[1]) for w in c.get('app',{}).get('windows',[])]; json.dump(c,open(p,'w',encoding='utf-8'),indent=2,ensure_ascii=False)" "CARVIS CORE $pv TEST"
-          $env:CARVIS_APP_ID = 'de.carviscore.app.test'
+          # TEST-Kennung = eigenes Datenprofil. Der Quellstand kann sie je Version festlegen (src-tauri/test-identifier.txt,
+          # z. B. de.carviscore.app.test13 für v1.3), damit mehrere TEST-Versionen ohne gemeinsame Daten nebeneinander laufen.
+          # Ohne Datei bleibt es bei de.carviscore.app.test (v1.1/v1.2 unverändert). Nur erlaubte Form, sonst Abbruch.
+          $tid = 'de.carviscore.app.test'
+          if (Test-Path src-tauri/test-identifier.txt) { $tid = (Get-Content src-tauri/test-identifier.txt -Raw).Trim() }
+          if ($tid -notmatch '^de\.carviscore\.app\.test[a-z0-9]{0,12}$') { throw "Ungültige TEST-Kennung: $tid" }
+          python -c "import json,sys; p='src-tauri/tauri.conf.json'; c=json.load(open(p,encoding='utf-8')); c['identifier']=sys.argv[2]; c['productName']='CARVIS CORE TEST'; [w.update(title=sys.argv[1]) for w in c.get('app',{}).get('windows',[])]; json.dump(c,open(p,'w',encoding='utf-8'),indent=2,ensure_ascii=False)" "CARVIS CORE $pv TEST" "$tid"
+          $env:CARVIS_APP_ID = $tid
+          "CARVIS_APP_ID=$tid" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Remove-Item src-tauri/target/release/bundle/nsis/*-setup.exe -Force
           npx --yes @tauri-apps/cli@2 build
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/test" | Out-Null
@@ -334,7 +341,6 @@ jobs:
           "TEST_V=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: "TEST: portable EXE testen (eigener Datenordner)"
         if: env.KANAL == 'test'
-        env: { CARVIS_APP_ID: de.carviscore.app.test }
         run: $o = python tools/test-portable.py "$env:RUNNER_TEMP/test/portable.exe" 2>&1 | ForEach-Object { "$_" }; $c = $LASTEXITCODE; $o; $o | Select-String '^(FEHLER|FAIL)' | Select-Object -First 15 | ForEach-Object { "::error title=TEST portable::$_" }; "::notice title=TEST portable::$(($o | Select-String '^(OK|FEHLER)').Count) Prüfungen, Code $c – $($o | Select-Object -Last 1)"; exit $c
       - name: "TEST: neben STABLE installieren, starten, entfernen – STABLE-Programm und -Daten bleiben unverändert"
         if: env.KANAL == 'test'
