@@ -530,7 +530,10 @@ jobs:
   veroeffentlichen:
     name: Veröffentlichen (Website + Release)
     needs: [pruefen, tests, echte-ki, windows]
-    if: needs.pruefen.outputs.bauen == 'ja' && needs.pruefen.outputs.kanal == 'stable' && (github.event.inputs.ref || 'main') == 'main' && (github.event_name == 'schedule' || github.event.inputs.veroeffentlichen == 'true')
+    # !cancelled() + ausdrücklich „success“ je Vorgänger: Ohne das überspringt GitHub den Job, weil der TEST-Job „schluessel“
+    # (Vorgänger von windows) im STABLE-Kanal planmäßig übersprungen wird. Veröffentlicht wird weiterhin NUR, wenn alle
+    # Prüfjobs wirklich erfolgreich waren.
+    if: ${{ !cancelled() && needs.pruefen.result == 'success' && needs.tests.result == 'success' && needs.echte-ki.result == 'success' && needs.windows.result == 'success' && needs.pruefen.outputs.bauen == 'ja' && needs.pruefen.outputs.kanal == 'stable' && (github.event.inputs.ref || 'main') == 'main' && (github.event_name == 'schedule' || github.event.inputs.veroeffentlichen == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
