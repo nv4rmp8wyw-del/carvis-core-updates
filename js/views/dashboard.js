@@ -1,199 +1,162 @@
-import { VERSION } from '../version.js';
-import { esc, greetingByTime, relTime } from '../util.js';
+// Dashboard v1.2 (D-054) nach den Referenzbildern des Inhabers (LIGHT/DARK identisch):
+// Kopf mit Begrüßung und großer CARVIS-Kugel (offizielles Logo) vor Lichtwellen, vier Schnellaktionen, drei Karten
+// (KI-Systeme · Systemübersicht · Letzte Aktivitäten) und das untere CARVIS-CORE-Band.
+// Ehrlichkeit: Jede Statusangabe stammt aus einer echten Prüfung. „Verbunden/Bereit“ nur nach echter Testantwort bzw.
+// echter Erkennung; der Prozentwert der Systemübersicht ist der Anteil bestandener Prüfungen (keine erfundene Kennzahl).
+import { health, STATUS, STATUS_LED } from '../health.js';
+import { esc, relTime } from '../util.js';
 import { icon } from '../ui.js';
-import { donut } from '../blocks.js';
-import { actions, projectProgress, store } from '../store.js';
-import { voice } from '../voice.js';
-import { sysmon, ring } from '../sysmon.js';
-import { agentClient, agentState } from '../agent-client.js';
-import { aiOverview } from './models.js';
-import { CATALOG, COST_LABEL } from '../ai/providers.js';
+import { store } from '../store.js';
+import { agentClient, inApp } from '../agent-client.js';
+import { ai, PHASE } from '../ai/autoconnect.js';
+import { STARTER } from '../ai/modelmanager.js';
+import { t, tn } from '../i18n.js';
+import { greetingWord } from '../greeting.js';
+
+// Kachel ohne Zwischenzustände („Prüfung läuft“), damit das Dashboard im Ruhezustand nicht neu zeichnet
+export const healthState = () => { const o = health.overall(); return o === 'checking' ? 'ok' : o; };
+
+/** Fünf getrennte, ehrliche Stufen. „bereit“ nur nach echter Testantwort (ai.verifiedAt). */
+export function aiLadder() {
+  const p = ai.phase;
+  const engine = ai.engine === true || ['kein-modell', 'verbinden', 'testen', 'bereit', 'laden'].includes(p);
+  const installed = p === 'bereit' || (ai.installed?.length || 0) > 0;
+  const connected = ['testen', 'bereit'].includes(p);
+  const verified = p === 'bereit' && !!ai.verifiedAt;
+  const agent = agentClient.connected ? 'yes' : inApp() ? 'no' : 'notNeeded';
+  const val = (b) => (b ? 'yes' : 'no');
+  const known = p !== 'idle' && p !== 'pruefen';
+  return [
+    { key: 'agent', state: agent },
+    { key: 'provider', state: known ? val(engine) : 'open', extra: engine && ai.server ? ai.server : '' },
+    { key: 'model', state: known && engine ? val(installed) : 'open' },
+    { key: 'connected', state: known && installed ? val(connected) : 'open' },
+    { key: 'verified', state: known ? val(verified) : 'open' },
+  ];
+}
+const LADDER_LED = { yes: 'ok', no: 'warn', open: 'idle', notNeeded: 'idle' };
+const ladderHtml = () => `<details class="ai-ladder-wrap"><summary class="icon-btn sm ghost" title="${esc(t('dash.aiStatus'))}" aria-label="${esc(t('dash.aiStatus'))}">i</summary><ol class="ai-ladder" aria-label="${esc(t('dash.aiStatus'))}">${aiLadder().map((s) =>
+  `<li data-step="${s.key}" data-state="${s.state}"><span class="led led-${LADDER_LED[s.state]}"></span><span>${esc(t(`ai.ladder.${s.key}`))}</span><b>${esc(t(`ai.ladder.${s.state}`))}${s.extra ? ` · ${esc(s.extra)}` : ''}</b></li>`).join('')}</ol></details>`;
+
+/** Ein Eintrag je Anbieter mit echtem Status: ok (echte Antwort) · found (gefunden) · none (nicht gefunden) · setup (nicht eingerichtet) · open (nicht geprüft) */
+export function providerRows(s = store.get()) {
+  const ready = ai.phase === 'bereit';
+  const checked = !['idle', 'pruefen'].includes(ai.phase);
+  const local = (name, found) => (ready && ai.server === name ? 'ok' : !checked ? 'open' : found);
+  const cloud = (vendor) => {
+    const ex = (s.experts || []).filter((e) => !e.local && (e.vendorKey === vendor || e.provider === vendor) && e.enabled);
+    return ex.some((e) => e.status === 'ok') ? 'ok' : ex.length ? 'found' : 'setup';
+  };
+  return [
+    { id: 'ollama', name: t('dash.pOllama'), icon: 'core', state: local('Ollama', ai.ollama === 'none' ? 'none' : ai.ollama ? 'found' : 'none') },
+    { id: 'lmstudio', name: 'LM Studio', icon: 'cube', state: local('LM Studio', ai.servers?.['LM Studio'] || 'none') },
+    { id: 'llamacpp', name: 'llama.cpp', icon: 'code', state: local('llama.cpp', ai.servers?.['llama.cpp'] || 'none') },
+    { id: 'cloud', name: t('dash.pCloud'), icon: 'sparkle', state: ['openrouter', 'gemini'].map(cloud).sort((a, b) => ['ok', 'found', 'setup'].indexOf(a) - ['ok', 'found', 'setup'].indexOf(b))[0] },
+  ];
+}
+const P_TONE = { ok: 'ok', found: 'info', none: 'idle', setup: 'idle', open: 'idle' };
+
+/** Systemübersicht: echte Prüfungen, Wert = Anteil bestandener */
+export function systemChecks() {
+  const hs = healthState();
+  const list = [
+    { key: 'sysAi', ok: ai.phase === 'bereit' },
+    { key: 'sysAgent', ok: agentClient.connected || !inApp(), na: !agentClient.connected && !inApp() },
+    { key: 'sysNet', ok: navigator.onLine },
+    { key: 'sysData', ok: typeof store.storageOk === 'function' ? store.storageOk() : true },
+    { key: 'sysHealth', ok: hs === 'ok' || hs === 'fixed' },
+  ];
+  const pct = Math.round((list.filter((x) => x.ok).length / list.length) * 100);
+  return { list, pct, hs };
+}
 
 function aiCard(s) {
-  const o = aiOverview(s);
-  const rows = s.experts.slice(0, 6);
-  const lastModel = [...s.messages].reverse().find((m) => m.role === 'assistant' && (m.source === 'llm' || m.source === 'collab'));
-  return `<section data-dash="ai" class="card glass span-2">
-    <header class="card-head"><h2>${icon('plug')} KI-Modelle</h2><button class="link-btn" data-go="#/gpt/models">Verwalten ›</button></header>
-    <div class="ai-summary">
-      <div class="ai-stat"><b>${o.connected}</b><span>verbunden</span></div>
-      <div class="ai-stat"><b>${o.available}</b><span>verfügbar</span></div>
-      <div class="ai-stat"><b>${o.notConnected}</b><span>nicht verbunden</span></div>
-      <div class="ai-stat"><b>0 €</b><span>bisherige Kosten*</span></div>
-    </div>
-    ${rows.length ? `<ul class="cat-list">${rows.map((e) => `<li><span class="led led-${e.status === 'ok' ? 'ok' : e.status === 'error' ? 'danger' : 'warn'}"></span><div><b>${esc(e.label)}</b><small>${e.local ? 'lokal' : esc(e.vendorKey)} · ${e.enabled ? 'aktiv' : 'deaktiviert'}</small></div><span class="muted small">${e.status === 'ok' ? 'verbunden' : e.status === 'error' ? 'Fehler' : 'ungetestet'}</span><span class="tag ${e.cost === 'free' ? 'tag-ok' : e.cost === 'paid' ? 'tag-danger' : 'tag-warn'}">${COST_LABEL[e.cost]}</span></li>`).join('')}</ul>`
-      : `<p class="muted small">Noch kein echtes KI-Modell verbunden. Vorbereitet: ${CATALOG.map((c) => c.name).join(', ')}. <button class="link-btn" data-go="#/gpt/models">Jetzt verbinden ›</button></p>`}
-    <p class="muted small">${lastModel ? `Zuletzt verwendet: <b>${esc(lastModel.model || '')}</b>. ` : ''}*CC selbst verursacht keine Kosten; kostenpflichtige Anbieter sind gesperrt, solange du sie nicht ausdrücklich freigibst.</p>
+  const busy = ['pruefen', 'verbinden', 'testen', 'laden'].includes(ai.phase) || ai.running;
+  const rows = providerRows(s);
+  let action = '';
+  if (ai.phase === 'kein-ollama') action = `<button class="btn btn-primary btn-sm" data-act="ai-install-ollama">${icon('update')} ${esc(t('ai.installOllama'))}</button>`;
+  else if (ai.phase === 'kein-modell' && ai.recommended) action = `<button class="btn btn-primary btn-sm" data-act="ai-setup-model" data-model="${ai.recommended.name}" data-size="${ai.recommended.sizeGB}">${icon('update')} ${esc(t('ai.setup', { label: ai.recommended.label, gb: ai.recommended.sizeGB }))}</button>`;
+  else if (ai.phase === 'fehler') action = `<button class="btn btn-primary btn-sm" data-act="ai-connect">${esc(t('ai.reconnect'))}</button>`;
+  else if (ai.phase === 'idle') action = `<button class="btn btn-primary btn-sm" data-act="ai-connect">${icon('core')} ${esc(t('ai.connect'))}</button>`;
+  const progress = ai.phase === 'laden' ? `<div class="bar" role="progressbar" aria-valuenow="${ai.progress?.pct ?? 0}" aria-valuemin="0" aria-valuemax="100"><i style="width:${ai.progress?.pct ?? 0}%"></i></div><button class="btn btn-sm btn-ghost" data-act="ai-cancel">${esc(t('ai.cancel'))}</button>` : '';
+  return `<section class="card dash-card dash-ai" data-dash-ai="${ai.phase}">
+    <header class="card-head"><h2 title="${esc(`${PHASE[ai.phase] || ''}${ai.detail ? ` – ${ai.detail}` : ''}`)}"><span class="led led-${ai.phase === 'bereit' ? 'ok' : ai.phase === 'fehler' ? 'danger' : busy ? 'idle led-pulse' : 'warn'}"></span> ${esc(t('dash.aiSystems'))}<small class="dash-ai-phase">${esc(PHASE[ai.phase] || '')}${ai.phase === 'bereit' ? ` · ${esc(ai.model)}` : ''}</small></h2><div class="head-tools">${ladderHtml()}<a class="icon-btn sm ghost" href="#/gpt/models" aria-label="${esc(t('dash.aiManager'))}">${icon('chevronR')}</a></div></header>
+    <ul class="prov-list">${rows.map((r) => `<li data-provider="${r.id}" data-state="${r.state}">${icon(r.icon)}<span>${esc(r.name)}</span><em class="badge badge-${P_TONE[r.state]}">${esc(t(`dash.p.${r.state}`))}</em><a class="icon-btn sm ghost" href="#/gpt/models" aria-label="${esc(t('dash.aiManager'))}">${icon('more')}</a></li>`).join('')}</ul>
+    <div class="dash-ai-actions">${action}${progress}<a class="btn btn-ghost btn-sm dash-wide" href="#/gpt/models">${icon('layers')} ${esc(t('dash.aiManager'))}</a></div>
   </section>`;
 }
 
-let probed = false;
-let liveLog = null;
-let logAt = 0; // Protokoll höchstens alle 5 s holen
+function sysCard() {
+  const { list, pct, hs } = systemChecks();
+  const aiOk = ai.phase === 'bereit';
+  const limited = hs === 'ok' && !aiOk;
+  const status = limited ? t('dash.noAiLimited') : STATUS[hs];
+  const C = 2 * Math.PI * 52;
+  const label = pct === 100 ? t('dash.optimal') : pct >= 60 ? t('dash.good') : t('dash.limited');
+  return `<section class="card dash-card dash-sys" data-heal-tile data-limited="${limited}">
+    <header class="card-head"><h2>${icon('monitor')} ${esc(t('dash.sysOverview'))}</h2><a class="icon-btn sm ghost" href="#/gpt/health" aria-label="${esc(t('common.details'))}">${icon('chevronR')}</a></header>
+    <div class="sys-body">
+      <div class="gauge-ring" role="img" aria-label="${esc(t('dash.gaugeAria', { n: pct }))}"><svg viewBox="0 0 120 120" aria-hidden="true"><defs><linearGradient id="gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#62d8e6"/><stop offset=".5" stop-color="#7a8cff"/><stop offset="1" stop-color="#b29cff"/></linearGradient></defs>
+        <circle cx="60" cy="60" r="52" class="g-track"/><circle cx="60" cy="60" r="52" class="g-val" stroke="url(#gr)" stroke-dasharray="${(C * pct) / 100} ${C}" transform="rotate(-90 60 60)"/></svg>
+        <div><b>${pct} %</b><small>${esc(label)}</small></div></div>
+      <ul class="sys-checks">${list.map((x) => `<li data-ok="${x.ok}">${x.ok ? icon('check') : '<span class="led led-warn"></span>'}<span title="${x.na ? esc(t('ai.ladder.notNeeded')) : ''}">${esc(t(`dash.${x.key}`))}</span></li>`).join('')}</ul>
+    </div>
+    <p class="small dash-sys-status"><span class="led led-${limited ? 'warn' : STATUS_LED[hs]}"></span> <span class="dash-big-inline">${esc(status)}</span></p>
+  </section>`;
+}
+
+const ACT_ICON = (txt = '') => (/optim|energ|autostart|temp/i.test(txt) ? 'bolt' : /modell|model|ki\b|ai\b/i.test(txt) ? 'layers' : /projekt|project/i.test(txt) ? 'check' : /chat/i.test(txt) ? 'chat' : 'history');
+function recentCard(s) {
+  const recent = (s.activity || []).slice(0, 4);
+  const tasksOpen = s.tasks.filter((x) => !x.done).length;
+  return `<section class="card dash-card dash-recent">
+    <header class="card-head"><h2>${icon('history')} ${esc(t('dash.recent'))}</h2><a class="icon-btn sm ghost" href="#/gpt/health" aria-label="${esc(t('common.details'))}">${icon('chevronR')}</a></header>
+    ${recent.length ? `<ul class="act-list">${recent.map((a) => `<li>${icon(a.icon && a.icon !== 'core' ? a.icon : ACT_ICON(a.text))}<span>${esc(a.text)}</span><time>${esc(relTime(a.ts))}</time></li>`).join('')}</ul>` : `<p class="empty">${esc(t('dash.nothing'))}</p>`}
+    ${tasksOpen ? `<a class="link-btn small" href="#/gpt/tasks">${esc(tn('dash.openTasks', tasksOpen))}</a>` : ''}
+  </section>`;
+}
+
 export default {
   id: 'dashboard',
-  title: 'Dashboard',
+  get title() { return t('nav.dashboard'); },
   icon: 'dashboard',
-  onMount(root, ctx) {
-    if (agentClient.connected && Date.now() - logAt > 5000) {
-      logAt = Date.now();
-      agentClient.log().then((l) => { const changed = JSON.stringify(l.log) !== JSON.stringify(liveLog); liveLog = l.log; if (changed && root.dataset.view === 'dashboard') (ctx.softRerender || ctx.rerender)(); }).catch(() => {});
-    }
-    if (probed) return;
-    probed = true; // einmal pro Sitzung automatisch messen, danach nur auf Knopfdruck
-    Promise.all([sysmon.measureLatency(), sysmon.readStorage(), sysmon.readBattery()])
-      .then(() => root.dataset.view === 'dashboard' && (ctx.softRerender || ctx.rerender)());
+  onAct(act) {
+    if (act === 'dash-talk') { location.hash = '#/carvis'; setTimeout(() => document.querySelector('[data-act="mic"]')?.click(), 300); }
+    if (act === 'dash-newchat') { import('../store.js').then(({ actions }) => { actions.newChat(); location.hash = '#/gpt/talk'; }); }
+    if (act === 'dash-diagnose') { health.runChecks({ force: true }); location.hash = '#/gpt/health'; }
   },
-  onChange(el, ctx) {
-    if (el.dataset.dashUlt !== undefined) { actions.setSettings({ ultimateDev: el.checked }); ctx.rerender(); }
-  },
-  onAct(act, el, ctx) {
-    if (act === 'dash-gpt-window' || act === 'dash-compare') {
-      import('./gpt.js').then((g) => {
-        if (act === 'dash-gpt-window') g.addPanel(); else g.setMode('compare');
-        location.hash = '#/gpt/chat';
-      });
-      return;
-    }
-    if (act === 'net-test') { const l = el.closest('.dash')?.querySelector('[data-lat]'); if (l) l.textContent = 'wird gemessen …'; sysmon.measureLatency().then(() => ctx.rerender()); }
-  },
-  render(s, ctx) {
-    const open = s.tasks.filter((t) => !t.done);
-    const done = s.tasks.length - open.length;
-    const prioOrder = { hoch: 0, mittel: 1, niedrig: 2 };
-    const next = [...open].sort((a, b) => prioOrder[a.priority] - prioOrder[b.priority]).slice(0, 5);
-    const st = ctx.status;
-    const ai = aiOverview(s);
-    const engine = ai.available
-      ? { v: `${ai.available} Modell${ai.available === 1 ? '' : 'e'} aktiv`, tone: ai.connected ? 'ok' : ai.failing ? 'danger' : 'warn', note: ai.connected ? `${ai.connected} verbunden` : 'ungetestet' }
-      : { v: 'Keine KI verbunden', tone: 'warn', note: 'Antworten aus Vorlagen, simuliert' };
-
-    const statusRows = [
-      ['KI-Koordination', engine.v, engine.tone, engine.note],
-      ['Spracheingabe', voice.sttEngine === 'agent' ? 'Windows, lokal' : voice.sttSupported ? 'Web Speech API' : 'nicht verfügbar', voice.sttSupported ? 'ok' : 'danger', voice.sttSupported ? 'bereit' : (voice.sttReason || '').slice(0, 60)],
-      ['Sprachausgabe', voice.ttsSupported ? (s.settings.voiceOutput ? 'aktiv' : 'stumm') : 'nicht unterstützt', voice.ttsSupported ? 'ok' : 'danger', voice.ttsSupported ? 'bereit' : ''],
-      ['Wake-Word „Hey C“', !voice.wakeSupported ? 'nicht verfügbar' : st.wake ? 'hört zu' : 'aus', st.wake ? 'ok' : 'idle', ''],
-      ['Lokaler Speicher', `${store.sizeKB()} KB`, store.storageOk() ? 'ok' : 'danger', store.storageOk() ? 'gesichert' : 'Fehler'],
-      ['Offline / PWA', st.sw ? 'Service Worker aktiv' : 'nicht aktiv', st.sw ? 'ok' : 'idle', st.online ? 'online' : 'offline'],
-    ];
-
-    const inf = sysmon.info();
-    const sm = sysmon.get();
-    const lat = sm.latency;
-    const memCount = s.memory.length;
-    const stPct = sm.storage ? Math.round((sm.storage.used / sm.storage.quota) * 100) : null;
-    const taskPct = s.tasks.length ? Math.round((done / s.tasks.length) * 100) : null;
-    const latTone = !lat ? 'idle' : lat.med == null ? 'danger' : lat.med < 150 ? 'ok' : lat.med < 400 ? 'warn' : 'danger';
-
-    return `<div class="page dash">
-      <section class="dash-top">
-        <div class="card dash-hello">
-          <p class="eyebrow" data-date></p>
-          <h1>${greetingByTime()}${s.settings.userName ? `, ${esc(s.settings.userName)}` : ''}.</h1>
-          <p class="muted">${open.length ? `<b>${open.length}</b> offene Aufgabe${open.length === 1 ? '' : 'n'} in <b>${s.projects.length}</b> Projekt${s.projects.length === 1 ? '' : 'en'}.` : 'Keine offenen Aufgaben.'}</p>
-          <span class="big-clock" data-clock="sec"></span>
-        </div>
-        <div class="card dash-health" aria-label="Systemzustand">
-          <button class="health" data-go="#/gpt/models"><span class="led led-${engine.tone}"></span><b>KI</b><span>${esc(engine.v)}</span><small>${esc(engine.note)}</small></button>
-          <button class="health" data-go="#/gpt/perf"><span class="led led-${agentClient.connected ? 'ok' : 'idle'}"></span><b>Agent</b><span>${agentClient.connected ? 'verbunden' : 'nicht verbunden'}</span><small>${agentClient.connected ? 'PC-Funktionen bereit' : 'nur in der Windows-App'}</small></button>
-          <button class="health" data-act="net-test"><span class="led led-${inf.online ? latTone : 'danger'}"></span><b>Netz</b><span>${inf.online ? 'online' : 'offline'}</span><small>${lat?.med != null ? `${lat.med} ms Antwortzeit` : 'Antwortzeit messen'}</small></button>
-          <button class="health" data-go="#/gpt/settings"><span class="led led-${store.storageOk() ? 'ok' : 'danger'}"></span><b>Daten</b><span>${store.sizeKB()} KB lokal</span><small>${store.storageOk() ? 'gespeichert' : 'Speicherfehler'}</small></button>
-        </div>
+  render(s) {
+    const ready = ai.phase === 'bereit';
+    const name = s.settings.userName ? `, ${esc(s.settings.userName)}` : '';
+    const { pct, hs } = systemChecks();
+    const allOk = pct === 100 && hs === 'ok';
+    return `<div class="page dash41 dash12">
+      <section class="dash-hero">
+        <div class="dash-hero-text"><p class="eyebrow">${esc(t('nav.dashboard'))}</p>
+          <h1>${esc(greetingWord())}${name}.</h1>
+          <p class="dash-q">${esc(ready ? t('dash.readyQ') : t('dash.notReady'))}</p></div>
+        <div class="hero-orb" aria-hidden="true" data-orb="${ready ? 'ready' : 'idle'}"><img src="icons/cc-orb-glow-512.png" alt="" width="260" height="260"></div>
+        <div class="waves" aria-hidden="true"></div>
       </section>
-
-      <section class="quick" aria-label="Schnellaktionen">
-        <button class="qa" data-go="#/carvis">${icon('core')}<b>Mit CARVIS sprechen</b><small>Sprach- und Textassistent</small></button>
-        <button class="qa" data-act="dash-gpt-window">${icon('window')}<b>Neues KI-Fenster</b><small>im GPT-Arbeitsbereich</small></button>
-        <button class="qa" data-act="dash-compare">${icon('compare')}<b>Modelle vergleichen</b><small>eine Frage, mehrere KIs</small></button>
-        <button class="qa" data-go="#/gpt/perf">${icon('bolt')}<b>PC-Diagnose</b><small>${agentClient.connected ? 'Messen und optimieren' : 'braucht den Desktop-Agenten'}</small></button>
-        <button class="qa" data-go="#/gpt/update">${icon('update')}<b>Updates prüfen</b><small>nur mit Bestätigung</small></button>
-        <button class="qa" data-go="#/gpt/design">${icon('preview')}<b>Design wechseln</b><small>Profile, Hell/Dunkel</small></button>
-        <button class="qa" data-act="quick-task">${icon('task')}<b>Neue Aufgabe</b><small>schnell erfassen</small></button>
-        <button class="qa" data-act="quick-plan">${icon('project')}<b>Plan erstellen</b><small>CARVIS plant mit dir</small></button>
+      <section class="dash-actions" aria-label="${esc(t('dash.quick'))}">
+        <button class="qa qa-primary" data-act="dash-talk"><i>${icon('mic')}</i><b>${esc(t('dash.qaTalk'))}</b></button>
+        <button class="qa" data-act="dash-newchat"><i>${icon('chat')}</i><b>${esc(t('dash.qaChat'))}</b></button>
+        <a class="qa" href="#/gpt/ucc"><i>${icon('bolt')}</i><b>${esc(t('dash.qaAutomate'))}</b></a>
+        <a class="qa" href="#/gpt/perf"><i>${icon('layers')}</i><b>${esc(t('dash.qaOptimize'))}</b></a>
       </section>
-
-      <div class="grid">
-        <section data-dash="activity" class="card glass">
-          <header class="card-head"><h2>${icon('dot')} Aktivität</h2></header>
-          <ul class="activity">${s.activity.slice(0, 6).map((a) => `<li>${icon(a.icon || 'dot')}<span>${esc(a.text)}</span><time>${relTime(a.ts)}</time></li>`).join('') || '<li class="muted">Noch keine Aktivität.</li>'}</ul>
-        </section>
-
-        <section data-dash="device" class="card glass" id="mon-device">
-          <header class="card-head"><h2>${icon('dashboard')} Gerät</h2><span class="tag tag-ok">GEMESSEN</span></header>
-          <div class="gauges">
-            ${ring(100, inf.cores ?? '–', 'CPU-Kerne', 'dim')}
-            ${ring(100, inf.memGB ? `${inf.memGB} GB` : '–', 'RAM (≈, nur Zahl)', 'dim')}
-            ${ring(stPct, stPct == null ? '–' : `${stPct}%`, 'Browser-Speicher', 'violet')}
-          </div>
-          <p class="muted small">Ein Browser darf die aktuelle CPU-Last und Prozesse nicht auslesen. In der Windows-App zeigt „Optimierung“ die echten Werte. RAM zeigt Chromium gerundet (max. 8 GB), Safari zeigt ihn nicht.${sm.battery ? ` Akku: ${sm.battery.level} %${sm.battery.charging ? ' (lädt)' : ''}.` : ''}</p>
-        </section>
-
-        <section data-dash="net" class="card glass" id="mon-net">
-          <header class="card-head"><h2>${icon('bolt')} Netzwerk</h2><button class="link-btn" data-act="net-test">Messen ›</button></header>
-          <ul class="status-list" data-net>
-            <li><span class="led led-${inf.online ? 'ok' : 'danger'}"></span><span class="k">Verbindung</span><span class="v">${inf.online ? 'online' : 'offline'}${inf.type ? ` <small>${esc(inf.type)}</small>` : ''}</span></li>
-            <li><span class="led led-${latTone}"></span><span class="k">Antwortzeit</span><span class="v" data-lat>${lat ? (lat.med == null ? 'keine Antwort' : `${lat.med} ms <small>min ${lat.min} · max ${lat.max}</small>`) : 'wird gemessen …'}</span></li>
-            <li><span class="led led-${lat && lat.loss ? 'warn' : lat ? 'ok' : 'idle'}"></span><span class="k">Paketverlust</span><span class="v" data-loss>${lat ? `${lat.loss} % <small>von ${lat.n}</small>` : '–'}</span></li>
-            <li><span class="led led-idle"></span><span class="k">Downlink (Schätzung)</span><span class="v">${inf.downlink != null ? `${inf.downlink} Mbit/s` : 'nicht verfügbar'}</span></li>
-          </ul>
-          <p class="muted small">Gemessen wird die Antwortzeit zum Server dieser App, kein vollständiger Speedtest und kein WLAN-Signal.</p>
-        </section>
-
-        <section data-dash="memory" class="card glass">
-          <header class="card-head"><h2>${icon('memory')} Gedächtnis</h2><button class="link-btn" data-go="#/gpt/memory">Öffnen ›</button></header>
-          <div class="gauges">
-            ${ring(100, memCount, 'Erinnerungen', 'dim')}
-            ${ring(100, s.messages.length, 'Nachrichten', 'dim')}
-            ${ring(taskPct, taskPct == null ? '–' : `${taskPct}%`, 'Aufgaben erledigt', 'ok')}
-          </div>
-          <p class="muted small">Alles liegt nur lokal in diesem Browser (${store.sizeKB()} KB).</p>
-        </section>
-
-        <section data-dash="status" class="card glass">
-          <header class="card-head"><h2>${icon('core')} Systemstatus</h2></header>
-          <ul class="status-list">${statusRows.map(([k, v, tone, n]) => `<li><span class="led led-${tone}"></span><span class="k">${k}</span><span class="v">${v}${n ? ` <small>${n}</small>` : ''}</span></li>`).join('')}</ul>
-        </section>
-
+      <div class="dash-grid3">
         ${aiCard(s)}
-
-        <section data-dash="projects" class="card glass span-2">
-          <header class="card-head"><h2>${icon('project')} Projekte</h2><button class="link-btn" data-go="#/gpt/projects">Alle ›</button></header>
-          ${s.projects.length ? `<div class="proj-mini">${s.projects.slice(0, 4).map((p) => {
-            const pr = projectProgress(p, s.tasks);
-            const n = s.tasks.filter((t) => t.projectId === p.id);
-            return `<div class="pm"><div class="pm-top"><b>${esc(p.name)}</b><span class="tag tag-${p.status === 'aktiv' ? 'ok' : p.status === 'pausiert' ? 'warn' : 'idle'}">${esc(p.status)}</span></div>
-              <div class="progress"><span style="--w:${pr}%"></span></div><small class="muted">${pr} % · ${n.filter((t) => t.done).length}/${n.length} Aufgaben</small></div>`;
-          }).join('')}</div>` : `<p class="empty">Noch keine Projekte. <button class="link-btn" data-act="quick-project">Erstes Projekt anlegen</button></p>`}
-        </section>
-
-        <section data-dash="tasks" class="card glass">
-          <header class="card-head"><h2>${icon('task')} Aufgaben</h2><button class="link-btn" data-go="#/gpt/tasks">Alle ›</button></header>
-          ${donut([{ label: 'Erledigt', value: done, color: 'rgb(var(--accent-rgb))' }, { label: 'Offen', value: open.length, color: 'var(--surface-4)' }], String(s.tasks.length))}
-          <ul class="mini-list">${next.map((t) => `<li><button class="check" data-act="toggle-task" data-id="${t.id}" aria-label="Erledigt"></button><span>${esc(t.title)}</span><span class="tag tag-${t.priority === 'hoch' ? 'danger' : t.priority === 'mittel' ? 'warn' : 'idle'}">${t.priority}</span></li>`).join('') || '<li class="muted">Alles erledigt.</li>'}</ul>
-        </section>
-
-        <section data-dash="optimize" class="card glass">
-          <header class="card-head"><h2>${icon('bolt')} Optimierung</h2></header>
-          <ul class="status-list">
-            <li><span class="led led-${agentClient.connected ? 'ok' : 'idle'}"></span><span class="k">Desktop-Agent</span><span class="v">${agentClient.connected ? 'verbunden' : 'nicht verbunden'}</span></li>
-          </ul>
-          <p class="muted small">${agentClient.connected ? 'Messen, PC optimieren und Gaming optimieren – mit Vorschau, Bestätigung und Rückgängig.' : 'Messwerte und Optimierungen stehen mit dem Desktop-Agenten der Windows-App zur Verfügung.'}</p>
-          <button class="btn btn-primary" data-go="#/gpt/perf">Optimierung öffnen</button>
-        </section>
-
-        <section data-dash="ucc" class="card glass span-2">
-          <header class="card-head"><h2>${icon('bolt')} Aktionen</h2></header>
-          <ul class="status-list">
-            <li><span class="led led-${agentClient.connected ? 'ok' : 'idle'}"></span><span class="k">Desktop-Agent</span><span class="v">${agentClient.connected ? 'verbunden' : 'nicht verbunden'}</span></li>
-            <li><span class="led led-${agentClient.state.perms?.ultimate ? 'ok' : 'idle'}"></span><span class="k">Aktionsmodus im Agent</span><span class="v">${agentClient.state.perms?.ultimate ? 'aktiv' : 'aus (Agent mit --aktionen starten)'}</span></li>
-            <li><span class="led led-${ai.connected ? 'ok' : 'idle'}"></span><span class="k">Verbundene KI-Modelle</span><span class="v">${ai.connected} von ${ai.available}</span></li></ul>
-          <p class="small" data-dash-ult>Computer-Aktionen: ${agentClient.connected ? (agentState.perms?.ultimate ? '<b>bereit</b> (Agent im Aktionsmodus)' : 'Agent verbunden, aber ohne --aktionen') : 'Agent nicht verbunden'}</p>
-          <h3 class="small">Live-Ausführungsprotokoll (Desktop-Agent)</h3>
-          ${agentClient.connected && liveLog ? `<ul class="activity" data-live-log>${[...liveLog].reverse().slice(0, 6).map((e) => `<li><span class="led led-${e.ok ? 'ok' : 'danger'}"></span><span>${esc(e.action)}${e.detail ? ` – ${esc(e.detail)}` : ''}</span><time>${relTime(e.ts)}</time></li>`).join('') || '<li class="muted">Noch keine Einträge.</li>'}</ul>` : '<p class="muted small" data-live-log>Kein Protokoll: Desktop-Agent nicht verbunden.</p>'}
-          <button class="btn btn-primary" data-go="#/gpt/ucc">Aktionen öffnen</button>
-        </section>
-
+        ${sysCard()}
+        ${recentCard(s)}
       </div>
+      <section class="dash-band">
+        <img src="icons/cc-orb-128.png" alt="" width="72" height="72">
+        <div><b>CARVIS CORE</b><span>${esc(t('dash.tagline'))}</span></div>
+        <a class="pill band-pill" href="#/gpt/health" data-all-ok="${allOk}"><span class="led led-${allOk ? 'ok' : 'warn'}"></span>${esc(allOk ? t('dash.allActive') : t('dash.someLimited', { n: 100 - pct }))}${icon('sparkle')}</a>
+        <div class="waves" aria-hidden="true"></div>
+      </section>
     </div>`;
   },
 };
+// Vorrat an Startmodellen bleibt für die Ein-Klick-Einrichtung im KI-Manager verfügbar
+export const _starter = STARTER;

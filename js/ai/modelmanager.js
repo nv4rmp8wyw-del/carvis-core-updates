@@ -15,21 +15,40 @@ import { agentClient } from '../agent-client.js';
 
 const GB = 1024 ** 3;
 
-/** Kostenlose Startmodelle mit Lizenz, Größe (ca., laut Ollama-Bibliothek) und Mindest-RAM.
- *  Nur Lizenzen, die eine spätere kommerzielle Nutzung von CARVIS CORE erlauben. */
+/**
+ * Kostenloser Modellkatalog (4.1). Nur Lizenzen, die eine spätere kommerzielle Nutzung von CARVIS CORE erlauben.
+ * Größen: ca.-Werte laut Ollama-Bibliothek (Wissensstand, von hier nicht live prüfbar – die echte Größe meldet der
+ * Download). minRamGB konservativ: Modell + Windows + App gleichzeitig. tasks: wofür das Modell sich eignet.
+ * Bewusst NICHT im Katalog: qwen2.5:3b und qwen2.5:72b (Qwen-Forschungslizenz, nicht kommerziell), Bildmodelle
+ * (CARVIS nutzt noch keine Bildeingabe), Modelle über 16 GB RAM.
+ */
 export const STARTER = [
-  { name: 'qwen2.5:0.5b', label: 'Qwen2.5 0.5B', sizeGB: 0.4, minRamGB: 4, license: 'Apache-2.0', commercial: true, note: 'sehr klein, einfache Fragen' },
-  { name: 'qwen2.5:1.5b', label: 'Qwen2.5 1.5B', sizeGB: 1.0, minRamGB: 6, license: 'Apache-2.0', commercial: true, note: 'schnell, guter Einstieg' },
-  { name: 'llama3.2:3b', label: 'Llama 3.2 3B', sizeGB: 2.0, minRamGB: 8, license: 'Llama 3.2 Community License', commercial: true, note: 'ausgewogen; Lizenzauflagen beachten (Namensnennung, Nutzungsrichtlinie)' },
-  { name: 'qwen2.5:7b', label: 'Qwen2.5 7B', sizeGB: 4.7, minRamGB: 16, license: 'Apache-2.0', commercial: true, note: 'beste Qualität der Liste' },
-  { name: 'qwen2.5-coder:7b', label: 'Qwen2.5-Coder 7B', sizeGB: 4.7, minRamGB: 16, license: 'Apache-2.0', commercial: true, note: 'Programmieren' },
+  { name: 'qwen2.5:0.5b', label: 'Qwen2.5 0.5B', family: 'Qwen', sizeGB: 0.4, minRamGB: 4, license: 'Apache-2.0', commercial: true, general: true, tasks: ['leicht', 'gespräch'], note: 'sehr klein, einfache Fragen' },
+  { name: 'smollm2:1.7b', label: 'SmolLM2 1.7B', family: 'SmolLM', sizeGB: 1.8, minRamGB: 6, license: 'Apache-2.0', commercial: true, tasks: ['leicht'], note: 'sehr schnell, Englisch stärker als Deutsch' },
+  { name: 'llama3.2:1b', label: 'Llama 3.2 1B', family: 'Llama', sizeGB: 1.3, minRamGB: 6, license: 'Llama 3.2 Community License', commercial: true, tasks: ['leicht', 'zusammenfassung'], note: 'klein; Lizenzauflagen beachten' },
+  { name: 'gemma3:1b', label: 'Gemma 3 1B', family: 'Gemma', sizeGB: 0.8, minRamGB: 6, license: 'Gemma Terms of Use', commercial: true, tasks: ['leicht', 'gespräch'], note: 'klein, mehrsprachig; Nutzungsrichtlinie beachten' },
+  { name: 'qwen2.5:1.5b', label: 'Qwen2.5 1.5B', family: 'Qwen', sizeGB: 1.0, minRamGB: 6, license: 'Apache-2.0', commercial: true, general: true, tasks: ['gespräch', 'deutsch'], note: 'schnell, guter Einstieg' },
+  { name: 'llama3.2:3b', label: 'Llama 3.2 3B', family: 'Llama', sizeGB: 2.0, minRamGB: 8, license: 'Llama 3.2 Community License', commercial: true, general: true, tasks: ['gespräch', 'zusammenfassung', 'deutsch'], note: 'ausgewogen; Lizenzauflagen beachten (Namensnennung, Nutzungsrichtlinie)' },
+  { name: 'phi4-mini', label: 'Phi-4 mini (3.8B)', family: 'Phi', sizeGB: 2.5, minRamGB: 8, license: 'MIT', commercial: true, tasks: ['logik', 'zusammenfassung'], note: 'stark bei Logik/Mathe für die Größe' },
+  { name: 'gemma3:4b', label: 'Gemma 3 4B', family: 'Gemma', sizeGB: 3.3, minRamGB: 10, license: 'Gemma Terms of Use', commercial: true, tasks: ['gespräch', 'deutsch', 'dokumente'], note: 'gutes Deutsch; Nutzungsrichtlinie beachten' },
+  { name: 'mistral:7b', label: 'Mistral 7B', family: 'Mistral', sizeGB: 4.1, minRamGB: 16, license: 'Apache-2.0', commercial: true, tasks: ['gespräch', 'texte'], note: 'bewährt, natürliche Texte' },
+  { name: 'qwen2.5:7b', label: 'Qwen2.5 7B', family: 'Qwen', sizeGB: 4.7, minRamGB: 16, license: 'Apache-2.0', commercial: true, general: true, tasks: ['gespräch', 'deutsch', 'dokumente', 'logik'], note: 'beste Allround-Qualität der Liste' },
+  { name: 'qwen2.5-coder:7b', label: 'Qwen2.5-Coder 7B', family: 'Qwen', sizeGB: 4.7, minRamGB: 16, license: 'Apache-2.0', commercial: true, tasks: ['programmieren'], note: 'Programmieren' },
+  { name: 'deepseek-r1:7b', label: 'DeepSeek-R1 Distill 7B', family: 'DeepSeek', sizeGB: 4.7, minRamGB: 16, license: 'MIT', commercial: true, tasks: ['logik'], note: 'denkt Schritt für Schritt – gründlich, aber langsam (für Gespräche ungeeignet)' },
 ];
+export const TASK_LABEL = { leicht: 'Schwache Hardware', gespräch: 'Gespräch', deutsch: 'Deutsch', programmieren: 'Programmieren', logik: 'Logik', zusammenfassung: 'Zusammenfassen', dokumente: 'Dokumente', texte: 'Texte' };
 
-/** Empfehlung nach Arbeitsspeicher (konservativ: Modell + System + App müssen gleichzeitig passen). */
+/** Empfehlung nach Arbeitsspeicher (konservativ: Modell + System + App müssen gleichzeitig passen). Nur Allround-Modelle. */
 export function recommend(ramGB) {
-  if (!ramGB) return STARTER[1];
-  const fit = STARTER.filter((m) => m.name !== 'qwen2.5-coder:7b' && m.minRamGB <= ramGB);
+  const gen = STARTER.filter((m) => m.general);
+  if (!ramGB) return gen.find((m) => m.name === 'qwen2.5:1.5b');
+  const fit = gen.filter((m) => m.minRamGB <= ramGB);
   return fit[fit.length - 1] || null;
+}
+
+/** Katalog für eine Aufgabe, passend zur Hardware: was installiert werden könnte (ohne etwas zu installieren). */
+export function catalogFor(ramGB, task = '') {
+  return STARTER.filter((m) => (!task || m.tasks.includes(task)) && (!ramGB || m.minRamGB <= ramGB));
 }
 
 let cache = { hw: null, ollama: null, at: 0 };

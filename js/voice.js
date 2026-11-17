@@ -6,36 +6,44 @@
 //   der Spracherkennung kollidieren kann).
 import { isIOS } from './util.js';
 import { startRecording, toBase64 } from './voice-recorder.js';
+import { t, langInfo } from './i18n.js';
 
 // Windows-App (Tauri/WebView2): Die Browser-Spracherkennung ist dort nicht verfügbar bzw. scheitert.
 const IN_APP = !!(window.__TAURI__ && window.__TAURI__.core);
-const APP_STT = 'Die Spracherkennung des Browsers steht in der Windows-App nicht zur Verfügung (WebView2), und die lokale Erkennung über den Agenten ist gerade nicht bereit. Tippe deine Frage oder starte den Agenten neu. Sprachausgabe funktioniert.';
+const APP_STT = () => t('voice.appStt');
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+// Meldungen in der App-Sprache (D-053); Getter, damit ein Sprachwechsel sofort gilt
 const ERRORS = {
-  'not-allowed': 'Mikrofonzugriff wurde verweigert. Bitte im Browser erlauben.',
-  'service-not-allowed': 'Spracherkennung ist in diesem Browser/Modus nicht erlaubt.',
-  'no-speech': 'Ich habe nichts gehört.',
-  'audio-capture': 'Kein Mikrofon gefunden.',
-  network: 'Spracherkennung braucht eine Internetverbindung.',
+  get 'not-allowed'() { return t('voice.err.notAllowed'); },
+  get 'service-not-allowed'() { return t('voice.err.serviceNotAllowed'); },
+  get 'no-speech'() { return t('voice.err.noSpeech'); },
+  get 'audio-capture'() { return t('voice.err.audioCapture'); },
+  get network() { return t('voice.err.network'); },
   aborted: null,
-  'language-not-supported': 'Deutsch wird für die Spracherkennung nicht unterstützt.',
+  get 'language-not-supported'() { return t('voice.err.langNotSupported', { name: langInfo().name }); },
 };
 
 export const voice = {
   // Spracherkennung: 'web' (Web Speech API im Browser) oder 'agent' (Windows-App: Aufnahme hier, Erkennung lokal
   // im Agenten mit Windows-System.Speech). WebView2 unterstützt die Web Speech API nicht.
   sttEngine: SR ? 'web' : null,
-  sttReason: SR ? '' : 'Spracherkennung wird von diesem Browser nicht unterstützt.',
+  sttReason: SR ? '' : t('voice.noSr'),
   agentRecognize: null,
   get sttSupported() { return !!this.sttEngine; },
   /** Windows-App: lokale Erkennung über den Agenten einschalten (recognize(base64Wav, lang) -> {text}). */
   useAgent(recognize, { available, reason } = {}) {
     if (available) { this.sttEngine = 'agent'; this.agentRecognize = recognize; this.sttReason = ''; }
-    else { this.sttEngine = null; this.sttReason = reason || 'Lokale Spracherkennung nicht verfügbar.'; }
+    else { this.sttEngine = null; this.sttReason = reason || t('voice.noLocal'); }
   },
   ttsSupported: 'speechSynthesis' in window,
+  // 4.1: hochwertige lokale Sprachausgabe (Piper über den Agenten), falls installiert. Die App spielt das Audio selbst ab
+  // und kann deshalb den ECHTEN Ausgabepegel messen (Orb). Sonst: Stimme des Systems (speechSynthesis).
+  agentTts: null,
+  ttsEngine: 'system',
+  useAgentTts(fn) { this.agentTts = fn || null; this.ttsEngine = fn ? 'piper' : 'system'; if (fn) this.ttsSupported = true; },
+  _audioEl: null,
   wakeSupported: !!SR && !isIOS(),
   listening: false,
   rec: null,
@@ -69,13 +77,13 @@ export const voice = {
     if (this.listening) return;
     this.cancelSpeak();
     this.listening = true;
-    const rec = startRecording({ onLevel, onSpeech: () => onInterim?.('Ich höre zu …') });
+    const rec = startRecording({ onLevel, onSpeech: () => onInterim?.(t('carvis.hearing')) });
     this.rec = { stop: rec.stop, abort: rec.cancel };
     onStart?.();
     let text = '', errored = false;
     rec.done
       .then(async (wav) => {
-        if (!wav) { errored = true; onError?.('Ich habe nichts gehört.', 'no-speech'); return; }
+        if (!wav) { errored = true; onError?.(t('voice.err.noSpeech'), 'no-speech'); return; }
         onInterim?.('Erkenne Sprache …');
         const r = await this.agentRecognize(toBase64(wav), lang);
         text = (r?.text || '').trim();
@@ -91,10 +99,10 @@ export const voice = {
   },
 
   async listenWeb({ lang = 'de-DE', onStart, onInterim, onFinal, onEnd, onError, onLevel } = {}) {
-    if (!SR) { onError?.(IN_APP ? (this.sttReason || APP_STT) : (this.sttReason || 'Spracherkennung wird von diesem Browser nicht unterstützt (z. B. Firefox). Nutze Chrome, Edge oder Safari.'), 'unsupported'); onEnd?.('', true); return; }
+    if (!SR) { onError?.(IN_APP ? (this.sttReason || APP_STT()) : (this.sttReason || t('voice.noSrLong')), 'unsupported'); onEnd?.('', true); return; }
     if (this.listening) return;
     if ((await this.micPermission()) === 'denied') {
-      onError?.('Das Mikrofon ist für diese Seite gesperrt. Klicke links in der Adressleiste auf das Schloss-Symbol → Mikrofon → Zulassen, dann erneut versuchen.', 'not-allowed');
+      onError?.(t('voice.micBlocked'), 'not-allowed');
       onEnd?.('', true);
       return;
     }
@@ -125,7 +133,7 @@ export const voice = {
     rec.onerror = (e) => {
       errored = true;
       const appFail = IN_APP && ['network', 'service-not-allowed', 'not-allowed', 'language-not-supported'].includes(e.error);
-      const msg = appFail ? APP_STT : ERRORS[e.error] === undefined ? `Spracherkennung: ${e.error}` : ERRORS[e.error];
+      const msg = appFail ? APP_STT() : ERRORS[e.error] === undefined ? `Spracherkennung: ${e.error}` : ERRORS[e.error];
       if (msg) onError?.(msg, e.error);
     };
     rec.onend = () => {
@@ -217,8 +225,40 @@ export const voice = {
    * verweigert (Autoplay-Regel) – dann muss der Nutzer einmal tippen/klicken.
    * Der Text wird satzweise mit kurzen Pausen gesprochen. Die Klangqualität bestimmt die gewählte Systemstimme.
    */
-  speak(text, { voiceName, lang = 'de-DE', rate = 1, pitch = 1, volume = 1, onStart, onEnd, onBoundary, onBlocked } = {}) {
-    if (!this.ttsSupported || !text) { onEnd?.(); return; }
+  speak(text, { voiceName, lang = 'de-DE', rate = 1, pitch = 1, volume = 1, onStart, onEnd, onBoundary, onBlocked, onLevel } = {}) {
+    if (this.agentTts && text) return this.speakAgent(text, { volume, onStart, onEnd, onBlocked, onLevel, fallback: () => this.speakSystem(text, { voiceName, lang, rate, pitch, volume, onStart, onEnd, onBoundary, onBlocked }) });
+    return this.speakSystem(text, { voiceName, lang, rate, pitch, volume, onStart, onEnd, onBoundary, onBlocked });
+  },
+
+  /** Piper über den Agenten: WAV holen, abspielen, echten Pegel messen; bei Fehler Systemstimme. */
+  async speakAgent(text, { volume = 1, onStart, onEnd, onBlocked, onLevel, fallback }) {
+    this.cancelSpeak();
+    const gen = ++this._gen;
+    let r;
+    try { r = await this.agentTts(this.plain ? this.plain(text) : text); } catch { if (gen === this._gen) fallback(); return; }
+    if (gen !== this._gen) return;
+    const a = new Audio(`data:audio/wav;base64,${r.wav}`);
+    a.volume = Math.max(0, Math.min(1, volume));
+    this._audioEl = a;
+    let raf = 0, ctx = null;
+    const finish = () => { if (this._audioEl !== a) return; this._audioEl = null; cancelAnimationFrame(raf); try { ctx?.close(); } catch { /* egal */ } if (this._finish === finish) this._finish = null; onEnd?.(); };
+    this._finish = finish;
+    a.onended = finish; a.onerror = finish;
+    if (onLevel) {
+      try {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const an = ctx.createAnalyser(); an.fftSize = 512;
+        ctx.createMediaElementSource(a).connect(an); an.connect(ctx.destination);
+        const buf = new Uint8Array(an.fftSize);
+        const tick = () => { an.getByteTimeDomainData(buf); let sum = 0; for (const v of buf) { const x = (v - 128) / 128; sum += x * x; } onLevel(Math.min(1, Math.sqrt(sum / buf.length) * 4)); raf = requestAnimationFrame(tick); };
+        tick();
+      } catch { /* ohne Pegel weiter abspielen */ }
+    }
+    try { await a.play(); onStart?.(); } catch (e) { this._audioEl = null; cancelAnimationFrame(raf); if (e?.name === 'NotAllowedError') onBlocked?.(); else fallback(); }
+  },
+
+  speakSystem(text, { voiceName, lang = 'de-DE', rate = 1, pitch = 1, volume = 1, onStart, onEnd, onBoundary, onBlocked } = {}) {
+    if (!('speechSynthesis' in window) || !text) { onEnd?.(); return; }
     this.cancelSpeak();
     const gen = ++this._gen;
     const parts = this.splitSpeech(text);
@@ -270,10 +310,11 @@ export const voice = {
     if (!this.ttsSupported) return;
     const f = this._finish;
     this._gen++;
-    speechSynthesis.cancel();
+    if (this._audioEl) { try { this._audioEl.pause(); } catch { /* egal */ } }
+    if ('speechSynthesis' in window) speechSynthesis.cancel();
     f?.(); // meldet das Ende der unterbrochenen Ausgabe wie bisher
   },
-  isSpeaking() { return this.ttsSupported && (speechSynthesis.speaking || speechSynthesis.pending); },
+  isSpeaking() { return !!(this._audioEl && !this._audioEl.paused) || ('speechSynthesis' in window && (speechSynthesis.speaking || speechSynthesis.pending)); },
 
   // ---- Wake-Word „Hey C“ (experimentell, nur Desktop, nur solange der Tab offen & sichtbar ist) ----
   startWake(onWake, { lang = 'de-DE', onState } = {}) {
@@ -322,7 +363,7 @@ export const voice = {
     w.onerror = (e) => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         this.wakeOn = false;
-        this._onWakeState?.(false, 'Mikrofon für Wake-Word nicht erlaubt.');
+        this._onWakeState?.(false, t('voice.wakeDenied'));
       }
     };
     w.onend = () => {

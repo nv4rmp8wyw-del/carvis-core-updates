@@ -78,7 +78,14 @@ async function research(text, { onStage = () => {}, mode } = {}) {
   } catch (e) {
     actions.logAI({ target: 'Wikipedia', model: 'Suche', chars: topic.length, ms: 0, status: 'error', note: e.message });
     const d = demo(text);
-    d.blocks.unshift({ type: 'notice', tone: 'danger', text: `Recherche nicht möglich (${e.message}).` });
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    d.blocks.unshift({ type: 'notice', tone: 'danger', text: `Recherche nicht möglich (${e.message}).${offline ? ' Offline: Die Suche wird nach der Wiederverbindung automatisch nachgeholt.' : ''}` });
+    // Offline: sichere, lesende Anfrage nach der Wiederverbindung wiederholen und das Ergebnis nachreichen
+    if (offline) import('./health.js').then(({ health }) => health.retryWhenOnline(`Wikipedia: ${topic}`, async () => {
+      const hits = await wikiSearch(topic, { lang: 'de', limit: 3 });
+      if (!hits.length) return;
+      actions.addMessage({ role: 'assistant', text: `**${hits[0].title}** – laut Wikipedia (nachgeholt nach Wiederverbindung):\n\n${hits[0].extract.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ')}`, source: 'research', blocks: [{ type: 'sources', items: hits.map((h) => ({ title: h.title, url: h.url })) }] });
+    })).catch(() => {});
     return d;
   }
 }

@@ -47,7 +47,7 @@ export function greetingByTime(d = new Date()) {
 export function md(src) {
   const code = [];
   let s = String(src ?? '').replace(/```[\w-]*\n?([\s\S]*?)```/g, (_, c) => {
-    code.push(`<pre><code>${esc(c.replace(/\n$/, ''))}</code></pre>`);
+    code.push(`<div class="code-wrap"><button class="code-copy" data-act="code-copy" type="button" aria-label="Code kopieren">Kopieren</button><pre><code>${esc(c.replace(/\n$/, ''))}</code></pre></div>`);
     return `\u0000${code.length - 1}\u0000`;
   });
   s = esc(s);

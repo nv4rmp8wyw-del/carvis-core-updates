@@ -1,4 +1,5 @@
 // Wiederverwendbare UI-Bausteine: Icons, Toasts, Modals, Bestätigungsdialoge, Nachrichten.
+import { t } from './i18n.js';
 import { $, esc, md, fmtTime } from './util.js';
 import { renderBlocks } from './blocks.js';
 
@@ -15,6 +16,9 @@ const P = {
   core: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 5a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z',
   clip: 'M16.5 6.5 8.4 14.6a1.5 1.5 0 0 0 2.1 2.1l8.1-8.1a3 3 0 0 0-4.2-4.2l-8.4 8.4a4.5 4.5 0 0 0 6.4 6.4l7.4-7.4 1.4 1.4-7.4 7.4a6.5 6.5 0 0 1-9.2-9.2l8.4-8.4a5 5 0 0 1 7 7l-8.1 8.1a3.5 3.5 0 0 1-5-5l8.1-8.1 1.4 1.4Z',
   history: 'M13 3a9 9 0 0 0-9 9H1l4 4 4-4H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3Zm-1 5v5l4.25 2.52.77-1.28-3.52-2.09V8H12Z',
+  send: 'M3 20.5 21 12 3 3.5 3 10l12 2-12 2z',
+  sun: 'M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5 1.5 3h-3L12 2Zm0 20-1.5-3h3L12 22ZM2 12l3-1.5v3L2 12Zm20 0-3 1.5v-3l3 1.5ZM4.9 4.9l3.2 1-2.2 2.2-1-3.2Zm14.2 14.2-3.2-1 2.2-2.2 1 3.2ZM4.9 19.1l1-3.2 2.2 2.2-3.2 1Zm14.2-14.2-1 3.2-2.2-2.2 3.2-1Z',
+  moon: 'M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z',
   more: 'M5 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z',
   trash: 'M6 7h12l-1 14H7L6 7Zm3-4h6l1 2h4v2H4V5h4l1-2Z',
   plus: 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z',
@@ -43,6 +47,16 @@ const P = {
   share: 'M18 16a3 3 0 0 0-2.4 1.2l-6.7-3.9a3 3 0 0 0 0-2.6l6.7-3.9A3 3 0 1 0 15 5l-6.7 3.9a3 3 0 1 0 0 6.2L15 19a3 3 0 1 0 3-3Z',
   close: 'M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7l-1.4-1.4L9.2 12 2.9 5.7l1.4-1.4 6.3 6.3 6.3-6.3 1.4 1.4Z',
   chevron: 'M7 10l5 5 5-5H7Z',
+  // v1.2 (eigene, neutrale Symbole)
+  search: 'M10.5 3a7.5 7.5 0 0 1 5.9 12.1l4.8 4.8-1.4 1.4-4.8-4.8A7.5 7.5 0 1 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Z',
+  chart: 'M4 20V10h3v10H4Zm6.5 0V4h3v16h-3ZM17 20v-7h3v7h-3Z',
+  cube: 'M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3L18.6 8 12 11.7 5.4 8 12 4.3ZM5 9.7l6 3.4v6.6l-6-3.3V9.7Zm8 10v-6.6l6-3.4v6.7l-6 3.3Z',
+  layers: 'M12 3 2 8.5l10 5.5 10-5.5L12 3Zm0 2.3 6 3.2-6 3.3-6-3.3 6-3.2ZM4.2 12 2 13.2 12 18.7l10-5.5-2.2-1.2-7.8 4.3L4.2 12Zm0 4L2 17.2 12 22.7l10-5.5L19.8 16 12 20.3 4.2 16Z',
+  monitor: 'M3 4h18v12H13v2h3v2H8v-2h3v-2H3V4Zm2 2v8h14V6H5Z',
+  check: 'M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2Z',
+  chevronR: 'M9 6l6 6-6 6-1.4-1.4L12.2 12 7.6 7.4 9 6Z',
+  sidebar: 'M3 4h18v16H3V4Zm2 2v12h4V6H5Zm6 0v12h8V6h-8Z',
+  sparkle: 'M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8L12 2Zm7 13 .9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15Z',
 };
 
 export const icon = (name, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[name] || P.dot}"/></svg>`;
@@ -127,7 +141,7 @@ export function modal({ title, body, actions = [], wide = false, onMount }) {
     const wrap = document.createElement('div');
     wrap.className = 'modal-backdrop';
     wrap.innerHTML = `<div class="modal glass ${wide ? 'modal-wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-      <header class="modal-head"><h3>${esc(title)}</h3><button class="icon-btn sm" data-close aria-label="Schließen">✕</button></header>
+      <header class="modal-head"><h3>${esc(title)}</h3><button class="icon-btn sm" data-close aria-label="${t('common.close')}">✕</button></header>
       <div class="modal-body">${body}</div>
       ${actions.length ? `<footer class="modal-foot">${actions.map((a, i) => `<button class="btn ${a.cls || 'btn-ghost'}" data-i="${i}">${esc(a.label)}</button>`).join('')}</footer>` : ''}
     </div>`;
@@ -158,25 +172,26 @@ export function modal({ title, body, actions = [], wide = false, onMount }) {
   });
 }
 
-export function confirmDialog(text, { title = 'Bitte bestätigen', ok = 'Bestätigen', danger = true } = {}) {
+export function confirmDialog(text, { title = t('common.pleaseConfirm'), ok = t('common.confirm'), danger = true } = {}) {
   return modal({
     title,
     body: `<p>${esc(text)}</p>`,
     actions: [
-      { label: 'Abbrechen', value: false },
+      { label: t('common.cancel'), value: false },
       { label: ok, value: true, cls: danger ? 'btn-danger' : 'btn-primary' },
     ],
   }).then(Boolean);
 }
 
 // ---- Nachrichten (geteilt von CARVIS- und GPT-Modus) ----
+const src = (key, cls) => ({ get label() { return t(`src.${key}`); }, cls, get title() { return t(`src.${key}T`); } });
 const SOURCE = {
-  local: { label: 'Lokal ausgeführt', cls: 'src-local', title: 'Echte, lokal ausgeführte Aktion' },
-  demo: { label: 'Vorlage · simuliert', cls: 'src-demo', title: 'Simulierte Antwort aus lokalen Vorlagen – keine echte KI' },
-  llm: { label: 'KI-Modell', cls: 'src-llm', title: 'Antwort eines echten Sprachmodells' },
-  collab: { label: 'Multi-KI', cls: 'src-collab', title: 'Mehrere echte Modelle, von CARVIS verglichen und zusammengeführt' },
-  research: { label: 'Recherche · Wikipedia', cls: 'src-local', title: 'Echte Recherche mit Quelle, ohne KI' },
-  system: { label: 'System', cls: 'src-sys', title: 'Systemmeldung' },
+  local: src('local', 'src-local'),
+  demo: src('demo', 'src-demo'),
+  llm: src('llm', 'src-llm'),
+  collab: src('collab', 'src-collab'),
+  research: src('research', 'src-local'),
+  system: src('system', 'src-sys'),
 };
 
 // Anhänge stehen als Block „📎 Anhang: Name“ + Codeblock im Nachrichtentext (so sieht sie auch die KI).
@@ -198,16 +213,16 @@ export function renderMessage(m, { compact = false } = {}) {
     <div class="msg-head"><span class="avatar" aria-hidden="true"></span><b>CARVIS</b><span class="src ${src.cls}" title="${src.title}">${esc(label)}</span>${compact ? '' : `<time>${fmtTime(m.ts)}</time>`}</div>
     <div class="bubble">${md(m.text)}${renderBlocks(compact ? (m.blocks || []).filter((b) => b.type === 'notice') : m.blocks)}</div>
     ${compact
-      ? (m.blocks?.length ? `<button class="link-btn" data-go="#/gpt/chat">Details im GPT-Modus ›</button>` : '')
+      ? (m.blocks?.length ? `<button class="link-btn" data-go="#/gpt/chat">${t('msg.details')}</button>` : '')
       : `<div class="msg-tools">
-          <button class="tool" data-act="speak-msg" data-id="${m.id}" title="Vorlesen">${icon('speak')}</button>
-          <button class="tool" data-act="copy-msg" data-id="${m.id}" title="Kopieren">${icon('copy')}</button>
-          <button class="tool" data-act="msg-to-doc" data-id="${m.id}" title="Als Dokument speichern">${icon('save')}</button>
+          <button class="tool" data-act="speak-msg" data-id="${m.id}" title="${t('msg.speak')}">${icon('speak')}</button>
+          <button class="tool" data-act="copy-msg" data-id="${m.id}" title="${t('msg.copy')}">${icon('copy')}</button>
+          <button class="tool" data-act="msg-to-doc" data-id="${m.id}" title="${t('msg.toDoc')}">${icon('save')}</button>
         </div>`}
   </div>`;
 }
 
 export function thinkingBubble(stage = '', partial = '') {
-  return `<div class="msg msg-ai msg-thinking"><div class="msg-head"><span class="avatar"></span><b>CARVIS</b><span class="src src-sys">${partial ? 'antwortet …' : 'verarbeitet …'}</span><button class="link-btn" data-act="stop-answer" title="Antwort abbrechen">■ Stopp</button></div>
+  return `<div class="msg msg-ai msg-thinking"><div class="msg-head"><span class="avatar"></span><b>CARVIS</b><span class="src src-sys">${partial ? t('msg.answering') : t('msg.working')}</span><button class="link-btn" data-act="stop-answer" title="${t('msg.stopTitle')}">${t('carvis.stop')}</button></div>
     <div class="bubble"><div class="stream">${partial ? md(partial) : ''}</div>${partial ? '' : '<span class="dots"><i></i><i></i><i></i></span>'}${stage && !partial ? `<span class="stage">${esc(stage)}</span>` : ''}</div></div>`;
 }

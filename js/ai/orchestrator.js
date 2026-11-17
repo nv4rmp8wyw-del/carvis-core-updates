@@ -6,6 +6,8 @@ import { callExpert, suitability, COST_LABEL } from './providers.js';
 import { score, agreementMatrix, numberConflicts } from './quality.js';
 import { findSensitive, redactSecrets } from './privacy.js';
 import { wikiSearch, researchTopic } from './research.js';
+import { lastSnapshot } from './modelmanager.js';
+import { lang, langInfo } from '../i18n.js';
 
 const TYPES = [
   ['code', /\b(code|programm|funktion|javascript|typescript|python|java\b|html|css|sql|api|bug|debug|regex|skript|script|app\b|algorithmus|compiler|git)\b/i],
@@ -30,10 +32,21 @@ export function analyze(text) {
   return { type, types: found, complex: reasons.length > 0, reasons, words };
 }
 
+/** Hardware-Hinweise für den Router aus dem letzten Modellmanager-Stand (ohne neue Abfrage). */
+export function routeHints() {
+  const snap = lastSnapshot() || {};
+  const GB = 1024 ** 3;
+  return {
+    ramGB: snap.hw?.ramGB || null,
+    loaded: new Set((snap.ollama?.loaded || []).map((m) => m.name)),
+    sizes: new Map((snap.ollama?.installed || []).map((m) => [m.name, (m.size || 0) / GB])),
+  };
+}
+
 /** 2) Verfügbare Modelle nach Eignung auswählen. */
 const SLOW_THINKERS = /deepseek-r1|qwq|reason|magistral/i;
 
-export function route(task, experts, settings, mode = 'gpt') {
+export function route(task, experts, settings, mode = 'gpt', hints = routeHints()) {
   // CARVIS 3.8: Nur lokal ausgeführte, explizit kostenlose Modelle automatisch wählen.
   // Gratis-Kontingente und kostenpflichtige Proxy-Anbieter niemals stillschweigend aufrufen.
   const usable = experts.filter((e) => e.enabled && e.local === true && e.cost === 'free');
@@ -46,9 +59,19 @@ export function route(task, experts, settings, mode = 'gpt') {
         + (e.local ? 0.02 : 0)
         // Im Sprachmodus zählt Tempo: langsame Denk-Modelle und gemessen langsame Modelle nachrangig
         - (mode === 'carvis' && SLOW_THINKERS.test(e.model) ? 0.3 : 0)
-        - (mode === 'carvis' && avgSecs(e) > 20 ? 0.1 : 0),
+        - (mode === 'carvis' && avgSecs(e) > 20 ? 0.1 : 0)
+        // 4.1 Hardware: bereits geladenes Modell bevorzugen (kein Umladen), zu große Modelle für den RAM meiden
+        + (hints.loaded.has(e.model) ? 0.05 : 0)
+        - (hints.ramGB && hints.sizes.get(e.model) > hints.ramGB * 0.6 ? 0.3 : 0),
     }))
     .sort((a, b) => b.fit - a.fit);
+  // 4.1 „Modell: Automatisch“ bevorzugt das zuletzt per echtem Testprompt bestätigte Modell (stabil, schnell);
+  // manuelle Wahl gilt für Einzelantworten, solange das Modell nutzbar ist.
+  const verified = settings.aiAuto?.verifiedAt ? settings.aiAuto.model : '';
+  if (verified) ranked.forEach((r) => { if (r.e.model === verified && r.e.status !== 'error') r.fit += 0.15; });
+  ranked.sort((a, b) => b.fit - a.fit);
+  const manual = settings.modelChoice && settings.modelChoice !== 'auto' ? ranked.find((r) => r.e.id === settings.modelChoice) : null;
+  if (manual && settings.collab !== 'always' && !(settings.collab === 'auto' && task.complex)) return { selected: [manual.e], ranked, why: 'manuell gewähltes Modell' };
   let n = 1;
   let why = 'einfache Anfrage → ein Modell genügt';
   if (settings.collab === 'always') { n = settings.maxExperts; why = 'Zusammenarbeit immer aktiv'; }
@@ -59,12 +82,19 @@ export function route(task, experts, settings, mode = 'gpt') {
   return { selected: ranked.slice(0, n).map((r) => r.e), ranked, why };
 }
 
+/** Antwortsprache folgt der App-Sprache (D-053). Für andere Sprachen zusätzlich auf Englisch, weil kleine Modelle das zuverlässiger befolgen. */
+export function answerLanguage() {
+  if (lang() === 'de') return 'Antworte auf Deutsch, freundlich und natürlich, und sprich den Nutzer mit „du“ an.';
+  const l = langInfo().ai;
+  return `Antworte immer auf ${l}, freundlich und natürlich. Always answer in ${l}, even if these instructions are in German.`;
+}
+
 function systemPrompt({ mode, task, memory, sources, userName }) {
   const brief = mode === 'carvis'
     ? 'Du sprichst gerade per Sprache mit dem Nutzer: antworte kurz, natürlich und direkt (höchstens 3–4 Sätze, keine Tabellen).'
     : 'Antworte klar strukturiert (Markdown-Listen/Überschriften wenn hilfreich).';
   return [
-    `Du bist C, der persönliche KI-Assistent „CARVIS CORE“.${userName ? ` Du sprichst mit ${userName}.` : ''} Antworte auf Deutsch, freundlich und natürlich, und sprich den Nutzer mit „du“ an.`,
+    `Du bist C, der persönliche KI-Assistent „CARVIS CORE“.${userName ? ` Du sprichst mit ${userName}.` : ''} ${answerLanguage()}`,
     brief,
     `Aufgabentyp: ${TYPE_LABEL[task.type]}.`,
     'Kennzeichne Unsicherheiten ehrlich und erfinde keine Fakten, Quellen oder Zahlen.',
@@ -76,7 +106,7 @@ function systemPrompt({ mode, task, memory, sources, userName }) {
 
 const JUDGE_SYSTEM = `Du bist CARVIS, die zentrale Instanz von CARVIS CORE. Mehrere KI-Modelle haben dieselbe Frage beantwortet.
 Prüfe ihre Antworten kritisch: erkenne Fehler, Widersprüche und Unsicherheiten. Übernimm nichts ungeprüft.
-Schreibe dann EINE bestmögliche, verständliche Antwort auf Deutsch, die die stärksten Teile vereint.
+Schreibe dann EINE bestmögliche, verständliche Antwort in der Sprache der Frage, die die stärksten Teile vereint.
 Erwähne die Modelle in der Antwort nicht namentlich.
 Füge danach eine Zeile "### PRÜFBERICHT" an und darunter genau ein JSON-Objekt:
 {"widersprueche": ["…"], "unsicherheiten": ["…"], "beste_quelle": "A"}`;
@@ -214,7 +244,7 @@ export async function orchestrate(text, { mode = 'gpt', confirm, onStage = () =>
     onStage(`Führe Ergebnisse zusammen (${j.label}) …`);
     const prompt = `Frage des Nutzers:\n${text}\n\n${good.map((r) => `--- Antwort ${r.letter} ---\n${r.content}`).join('\n\n')}`;
     try {
-      const out = await callExpert(j, [{ role: 'system', content: JUDGE_SYSTEM + (mode === 'carvis' ? '\nDie Antwort wird vorgelesen: höchstens 4 Sätze.' : '') }, { role: 'user', content: j.local || s.shareMemoryExternal ? prompt : redactSecrets(prompt) }], s);
+      const out = await callExpert(j, [{ role: 'system', content: JUDGE_SYSTEM + `\n${answerLanguage()}` + (mode === 'carvis' ? '\nDie Antwort wird vorgelesen: höchstens 4 Sätze.' : '') }, { role: 'user', content: j.local || s.shareMemoryExternal ? prompt : redactSecrets(prompt) }], s);
       actions.logAI({ target: j.local ? `lokal · ${j.provider}` : `extern · ${j.vendorKey}`, model: j.model, chars: prompt.length, ms: out.ms, status: 'ok', note: 'Zusammenführung' });
       const p = parseJudge(out.content);
       if (p.answer.length > 20) {

@@ -46,7 +46,7 @@ export default {
         ${AGENTS.map((a) => {
           const st = STATUS[agentStatus(a, s)];
           return `<section class="card glass" data-agent="${a.id}"><header class="card-head"><h2>${icon(a.icon)} ${esc(a.name)}</h2><span class="tag ${st.cls}">${st.label}</span></header>
-            <p class="muted small">${esc(a.desc)}</p>${a.go ? `<button class="link-btn" data-go="${a.go}">Öffnen ›</button>` : ''}</section>`;
+            <p class="muted small">${esc(a.desc)}</p>${a.perm && a.perm !== '–' ? `<p class="small"><b>Rechte:</b> ${esc(a.perm)}${a.limit && a.limit !== '–' ? ` · <b>Grenzen:</b> ${esc(a.limit)}` : ''}</p>` : ''}${a.go ? `<button class="link-btn" data-go="${a.go}">Öffnen ›</button>` : ''}</section>`;
         }).join('')}
       </div>
       <header class="page-head compact" style="margin-top:26px"><div><h1 style="font-size:20px">Abläufe</h1></div></header>

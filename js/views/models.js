@@ -4,7 +4,8 @@ import { icon, toast, confirmDialog, modal } from '../ui.js';
 import { actions, store } from '../store.js';
 import { CATALOG, COST_LABEL, makeExpert, discoverOllama, discoverProxy, callExpert } from '../ai/providers.js';
 
-import { snapshot, lastSnapshot, modelRows, recommend, STARTER, STATUS_LABEL, STATUS_LED, pullModel, setLoaded, deleteModel, connectInstalled } from '../ai/modelmanager.js';
+import { health } from '../health.js';
+import { snapshot, lastSnapshot, modelRows, recommend, STARTER, TASK_LABEL, STATUS_LABEL, STATUS_LED, pullModel, setLoaded, deleteModel, connectInstalled } from '../ai/modelmanager.js';
 import { BROWSER_MODELS, webgpuStatus, onProgress, progress, load as loadBrowserModel, removeModel } from '../ai/webllm.js';
 
 export function browserExpert(m) {
@@ -45,7 +46,7 @@ function managerCard(st) {
       <br><small class="muted">Ein Modell wird nicht mit CARVIS CORE ausgeliefert: Selbst das kleinste brauchbare Modell (≈ 0,4 GB) plus Laufzeit wäre ein Vielfaches der App (15 MB). Downloads starten nur nach deiner Zustimmung.</small></div>` : ''}
     ${pulling}
     <div class="tbl-wrap"><table class="tbl mm-table"><thead><tr><th>Modell</th><th>Status</th><th>Größe</th><th>Lizenz</th><th></th></tr></thead><tbody>
-      ${rows.map((r) => `<tr data-model="${esc(r.name)}"><td><b>${esc(r.label)}</b>${r.cat ? `<br><small class="muted">${esc(r.cat.note)}${r.cat.minRamGB ? ` · ab ${r.cat.minRamGB} GB RAM` : ''}</small>` : ''}</td>
+      ${rows.map((r) => `<tr data-model="${esc(r.name)}"><td><b>${esc(r.label)}</b>${r.cat ? `<br><small class="muted">${esc(r.cat.note)}${r.cat.minRamGB ? ` · ab ${r.cat.minRamGB} GB RAM` : ''}${r.cat.tasks?.length ? ` · ${r.cat.tasks.map((t) => esc(TASK_LABEL[t] || t)).join(', ')}` : ''}</small>` : ''}</td>
         <td><span class="led led-${STATUS_LED[r.status]}"></span> <span data-status>${STATUS_LABEL[r.status]}</span>${r.loaded ? `<br><small class="muted">${fmtGB(r.loaded.size)} im Speicher${r.loaded.vram ? `, davon ${fmtGB(r.loaded.vram)} VRAM` : ''}</small>` : ''}</td>
         <td>${fmtGB(r.size)}${r.installed ? '' : ' <small class="muted">Download</small>'}</td>
         <td>${r.cat ? esc(r.cat.license) : '<small class="muted">siehe Ollama-Bibliothek</small>'}</td>
@@ -244,6 +245,13 @@ export default {
       try {
         await pullModel(name, { signal: pullCtrl.signal, onProgress: (p) => { mm.phase = p.status; if (p.pct != null) mm.pct = p.pct; const bar = document.querySelector('.mm-progress'); if (bar) { bar.querySelector('span').style.setProperty('--w', `${mm.pct || 3}%`); bar.firstChild.nextSibling.textContent = ` · ${p.status}${mm.pct != null ? ` · ${mm.pct} %` : ''}`; } } });
         toast(`${c?.label || name} ist eingerichtet und verbunden`, 'ok', 5000);
+        // Wie die Ein-Klick-Einrichtung im Dashboard: neues Modell wird das Automatik-Modell und echt geprüft
+        // (eine manuelle Modellwahl bleibt unangetastet)
+        const st0 = store.get().settings;
+        if (!st0.modelChoice || st0.modelChoice === 'auto') {
+          actions.setSettings({ aiAuto: { model: name, verifiedAt: 0 } });
+          import('../ai/autoconnect.js').then(({ autoConnectAI }) => autoConnectAI({ force: true })).catch(() => {});
+        }
         ctx.renderStatus();
       } catch (e) { mm.err = `Download fehlgeschlagen: ${e.message}`; }
       mm.pulling = null; pullCtrl = null;
@@ -251,7 +259,7 @@ export default {
     }
     if (act === 'mm-load' || act === 'mm-unload') {
       el.disabled = true;
-      try { await setLoaded(el.dataset.name, act === 'mm-load'); } catch (e) { toast(`${act === 'mm-load' ? 'Laden' : 'Entladen'} fehlgeschlagen: ${e.message}`, 'danger'); }
+      try { await setLoaded(el.dataset.name, act === 'mm-load'); } catch (e) { if (act === 'mm-load') health.report('model-switch-failed', { subject: el.dataset.name, cause: `Modell „${el.dataset.name}“ ließ sich nicht laden (${e.message})` }); toast(`${act === 'mm-load' ? 'Laden' : 'Entladen'} fehlgeschlagen: ${e.message}`, 'danger'); }
       return refreshManager(ctx);
     }
     if (act === 'mm-delete') {
@@ -339,7 +347,7 @@ export default {
       }
       el.disabled = true; el.textContent = 'Teste …';
       try {
-        const r = await callExpert(ex, [{ role: 'user', content: 'Antworte nur mit dem Wort OK.' }], s, { timeout: 60000 });
+        const r = await callExpert(ex, [{ role: 'user', content: 'Antworte nur mit dem Wort OK.' }], s, { timeout: 60000, maxTokens: 32 });
         actions.updateExpert(ex.id, { status: 'ok', lastError: '' });
         actions.logAI({ target: ex.local ? `lokal · ${ex.provider}` : `extern · ${ex.vendorKey}`, model: ex.model, chars: 27, ms: r.ms, status: 'ok', note: 'Verbindungstest' });
         toast(`${ex.label}: „${r.content.slice(0, 30)}“ (${(r.ms / 1000).toFixed(1)} s)`, 'ok');

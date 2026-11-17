@@ -1,101 +1,117 @@
+// Einstellungen. D-053: alle Texte aus dem Sprachsystem; App-Sprache wählbar (wirkt sofort, ohne Neustart, auch auf
+// KI-Antworten und Sprache). Spracheingabe/-ausgabe zeigen ehrlich, was auf diesem Gerät für die Sprache verfügbar ist.
 import { esc, download } from '../util.js';
 import { icon, confirmDialog, toast } from '../ui.js';
 import { actions, store } from '../store.js';
 import { voice } from '../voice.js';
+import { VERSION, displayVersion } from '../version.js';
+import { modelMenu, modelLabel } from './talk.js';
+import { applyTheme } from '../theme.js';
+import { t, lang, setLang, langInfo, LANGS } from '../i18n.js';
 
-import { VERSION } from '../version.js';
+const GENDER = { alle: 'set.genderAll', weiblich: 'set.genderF', männlich: 'set.genderM' };
 
 export default {
   id: 'settings',
-  title: 'Einstellungen',
+  get title() { return t('set.title'); },
   icon: 'settings',
-  render(s, ctx) {
+  render(s) {
     const st = s.settings;
     const gF = st.voiceGender || 'alle';
-    const voices = voice.voices().filter((v) => (st.voiceAllLangs || v.lang?.startsWith((st.lang || 'de').slice(0, 2))) && (gF === 'alle' || voice.guessGender(v.name) === gF));
-    return `<div class="page settings">
-      <header class="page-head"><div><p class="eyebrow">CARVIS CORE</p><h1>Einstellungen</h1></div></header>
+    const L = langInfo();
+    const prefix = (st.lang || L.speech).slice(0, 2);
+    const langVoices = voice.voices().filter((v) => v.lang?.startsWith(prefix));
+    const voices = voice.voices().filter((v) => (st.voiceAllLangs || v.lang?.startsWith(prefix)) && (gF === 'alle' || voice.guessGender(v.name) === gF));
+    const light = document.documentElement.dataset.theme === 'light';
+    const ok = s.experts.filter((e) => e.enabled && e.status === 'ok').length;
+    const adv = (body) => `<details class="adv"><summary>${t('common.advanced')}</summary><div class="adv-body">${body}</div></details>`;
+    const sw = (key, label, extra = '') => `<label class="switch"><input type="checkbox" data-set="${key}" ${st[key] ? 'checked' : ''}><span></span> ${label}${extra}</label>`;
+    const sttTag = voice.sttEngine === 'agent' ? t('set.sttLocalTag') : voice.sttSupported ? t('set.browser') : t('set.sttNoneTag');
+    const caps = t('set.caps', {
+      lang: L.name,
+      stt: voice.sttSupported ? `${t('set.capYes')} (${t('set.capUnchecked')})` : t('set.capNo'),
+      tts: voice.ttsSupported && langVoices.length ? t('set.capVoices', { n: langVoices.length }) : t('set.capNo'),
+    });
+    return `<div class="page settings settings5">
+      <header class="page-head"><div><h1>${t('set.title')}</h1></div></header>
 
-      <section class="card glass">
-        <header class="card-head"><h2>Profil</h2></header>
-        <label class="field">Wie soll C dich nennen?<input data-set="userName" value="${esc(st.userName)}" maxlength="30" placeholder="Dein Name"></label>
-      </section>
-
-      <section class="card glass">
-        <header class="card-head"><h2>KI-Modelle</h2></header>
-        <p class="muted small">Verbindungen zu Ollama, lokalen Servern und Cloud-Anbietern (über deinen Proxy), Zusammenarbeit mehrerer KIs, Kosten und Protokoll findest du unter <b>KI-Modelle</b>.</p>
-        <button class="btn btn-primary" data-go="#/gpt/models">${icon('plug')} KI-Modelle öffnen</button>
-      </section>
-
-      <section class="card glass">
-        <header class="card-head"><h2>Stimme</h2><span class="tag ${voice.ttsSupported ? 'tag-ok' : 'tag-danger'}">${voice.ttsSupported ? 'Sprachausgabe verfügbar' : 'nicht unterstützt'}</span></header>
-        <label class="switch"><input type="checkbox" data-set="voiceOutput" ${st.voiceOutput ? 'checked' : ''}><span></span> Antworten im CARVIS-Modus vorlesen</label>
-        <label class="field">Anrede<select data-set="addressForm"><option value="sie" ${st.addressForm !== 'du' ? 'selected' : ''}>Sie (förmlich)</option><option value="du" ${st.addressForm === 'du' ? 'selected' : ''}>du</option></select></label>
-        <label class="switch"><input type="checkbox" data-set="greetOnOpen" ${st.greetOnOpen ? 'checked' : ''}><span></span> Beim Öffnen laut begrüßen</label>
-        <label class="switch"><input type="checkbox" data-set="conversationMode" ${st.conversationMode ? 'checked' : ''}><span></span> Gesprächsmodus: nach jeder gesprochenen Antwort wieder zuhören <span class="muted small">(beenden mit „Stopp“)</span></label>
-        <label class="field">Sprache<select data-set="lang"><option value="de-DE" ${st.lang === 'de-DE' ? 'selected' : ''}>Deutsch</option><option value="en-US" ${st.lang === 'en-US' ? 'selected' : ''}>English (Spracheingabe/-ausgabe)</option></select></label>
-        <p class="muted small">Browser erlauben Sprachausgabe oft erst nach einem Klick/Tippen. Ist das so, zeigt CARVIS einen Hinweis zum Antippen. Sprechen unterbrechen: „■ Stopp“, Klick auf den Kern oder Mikrofon drücken.</p>
-        <div class="two">
-          <label class="field">Geschlecht (geschätzt)<select data-set="voiceGender">${['alle', 'weiblich', 'männlich'].map((g) => `<option ${gF === g ? 'selected' : ''}>${g}</option>`).join('')}</select></label>
-          <label class="switch" style="align-self:end"><input type="checkbox" data-set="voiceAllLangs" ${st.voiceAllLangs ? 'checked' : ''}><span></span> Alle Sprachen anzeigen</label>
+      <section class="card" data-sec="darstellung">
+        <header class="card-head"><h2>${icon('sun')} ${t('set.look')}</h2></header>
+        <div class="seg" role="radiogroup" aria-label="${esc(t('set.look'))}">
+          <button class="seg-btn${light ? ' on' : ''}" role="radio" aria-checked="${light}" data-act="set-mode" data-mode="light">${icon('sun')} ${t('set.light')}</button>
+          <button class="seg-btn${light ? '' : ' on'}" role="radio" aria-checked="${!light}" data-act="set-mode" data-mode="dark">${icon('moon')} ${t('set.dark')}</button>
         </div>
-        <label class="field">Stimme<select data-set="voiceName"><option value="">Automatisch</option>${voices.map((v) => `<option ${v.name === st.voiceName ? 'selected' : ''} value="${esc(v.name)}">${esc(v.name)} · ${esc(v.lang)} · ${voice.guessGender(v.name)}${v.localService ? '' : ' (online)'}</option>`).join('') }</select></label>
-        <p class="muted small">${voices.length} Stimmen gefunden. Der Browser meldet das Geschlecht nicht, die Angabe ist eine Schätzung nach dem Namen. CC nutzt die Systemstimmen deines Geräts. Am natürlichsten klingen unter Windows die Edge-Stimmen mit „Natural“ im Namen und auf dem iPhone die Stimmen mit „Erweitert/Premium“ (in den iOS-Einstellungen unter Bedienungshilfen → Gesprochene Inhalte ladbar). Menschlich ist keine davon, CC zerlegt nur Sätze mit kurzen Pausen und leichter Betonung.</p>
-        <div class="two">
-          <label class="field">Tempo <output>${st.rate.toFixed(1)}</output><input type="range" min="0.6" max="1.6" step="0.1" data-set="rate" value="${st.rate}"></label>
-          <label class="field">Tonhöhe <output>${st.pitch.toFixed(1)}</output><input type="range" min="0.5" max="1.5" step="0.1" data-set="pitch" value="${st.pitch}"></label>
-          <label class="field">Lautstärke <output>${Math.round((st.volume ?? 1) * 100)} %</output><input type="range" min="0" max="1" step="0.05" data-set="volume" value="${st.volume ?? 1}"></label>
-        </div>
-        <button class="btn btn-ghost" data-act="tts-test">${icon('speak')} Stimme testen</button>
+        <label class="field">${t('set.nameQ')}<input data-set="userName" value="${esc(st.userName)}" maxlength="30" placeholder="${esc(t('set.namePh'))}"></label>
+        ${adv(`${sw('reduceMotion', t('set.reduceMotion'))}
+          <button class="btn btn-ghost btn-sm" data-go="#/gpt/design">${t('set.colors')}</button>`)}
       </section>
 
-      <section class="card glass">
-        <header class="card-head"><h2>Spracheingabe</h2><span class="tag ${voice.sttSupported ? 'tag-ok' : 'tag-danger'}">${voice.sttEngine === 'agent' ? 'lokal (Windows)' : voice.sttSupported ? 'Browser' : 'nicht verfügbar'}</span></header>
-        <p class="muted small" data-stt-info>${voice.sttEngine === 'agent' ? 'Die Windows-App nimmt hier auf und erkennt die Sprache lokal mit der Windows-Spracherkennung (offline, keine Cloud). Die Aufnahme endet automatisch nach einer Sprechpause.' : voice.sttEngine === 'web' ? 'Der Browser erkennt die Sprache über die Web Speech API; Chrome und Edge senden das Audio dazu an Google- bzw. Microsoft-Server.' : voice.sttReason}</p>
-        <label class="switch"><input type="checkbox" data-set="autoSendVoice" ${st.autoSendVoice ? 'checked' : ''}><span></span> Erkannten Text automatisch senden</label>
-        <label class="switch ${voice.wakeSupported ? '' : 'disabled'}"><input type="checkbox" data-set="wakeWord" ${st.wakeWord && voice.wakeSupported ? 'checked' : ''} ${voice.wakeSupported ? '' : 'disabled'}><span></span> Wake-Word „Hey C“ <span class="tag tag-warn">experimentell</span></label>
-        <p class="muted small">${voice.wakeSupported
-          ? 'Das Wake-Word funktioniert nur, solange CC geöffnet und sichtbar ist (Chrome/Edge am PC). Es ist kein dauerhaftes Hintergrund-Wake-Word. Hinweis: Chrome und Edge senden Audio zur Erkennung an Google- bzw. Microsoft-Server.'
-          : 'Auf diesem Gerät/Browser ist ein Wake-Word nicht zuverlässig möglich (z. B. iPhone/Safari). Nutze die Mikrofontaste.'}</p>
+      <section class="card" data-sec="ki">
+        <header class="card-head"><h2>${icon('core')} ${t('set.ai')}</h2><span class="tag ${ok ? 'tag-ok' : 'tag-warn'}">${ok ? t('set.aiReady', { n: ok }) : t('set.aiNot')}</span></header>
+        <div class="row-actions"><button class="btn" data-act="set-model">${esc(t('dash.model', { m: '' }).trim())} <b data-set-model>${esc(modelLabel(s))}</b></button></div>
+        <p class="muted small">${t('set.autoHint')}</p>
+        ${adv(`<button class="btn btn-ghost btn-sm" data-go="#/gpt/models">${icon('plug')} ${t('set.manage')}</button>`)}
       </section>
 
-      <section class="card glass">
-        <header class="card-head"><h2>Darstellung</h2></header>
-        <label class="switch"><input type="checkbox" data-set="reduceMotion" ${st.reduceMotion ? 'checked' : ''}><span></span> Animationen reduzieren (spart Akku)</label>
+      <section class="card" data-sec="sprache">
+        <header class="card-head"><h2>${icon('mic')} ${t('set.speech')}</h2><span class="tag ${voice.ttsSupported ? 'tag-ok' : 'tag-danger'}">${esc(sttTag)}</span></header>
+        <label class="field">${t('set.uiLang')}<select data-ui-lang aria-describedby="lang-hint">${LANGS.map((l) => `<option value="${l.code}" ${l.code === lang() ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></label>
+        <p class="muted small" id="lang-hint">${t('lang.hint')}</p>
+        <p class="small" data-speech-caps>${esc(caps)}</p>
+        ${langVoices.length ? '' : `<p class="notice notice-warn small" data-voice-none>${esc(t('set.voiceNone'))}</p>`}
+        ${sw('voiceOutput', t('set.readAloud'))}
+        ${sw('conversationMode', t('set.conv'), ` <span class="muted small">${t('set.convHint')}</span>`)}
+        <label class="field">${t('set.voice')}<select data-set="voiceName"><option value="">${t('set.auto')}</option>${voices.map((v) => `<option ${v.name === st.voiceName ? 'selected' : ''} value="${esc(v.name)}">${esc(v.name)} · ${esc(v.lang)}${v.localService ? '' : ' (online)'}</option>`).join('')}</select></label>
+        <button class="btn btn-ghost btn-sm" data-act="tts-test">${icon('speak')} ${t('set.testVoice')}</button>
+        ${adv(`<div class="two">
+            <label class="field">${t('set.address')}<select data-set="addressForm"><option value="sie" ${st.addressForm !== 'du' ? 'selected' : ''}>${t('set.formal')}</option><option value="du" ${st.addressForm === 'du' ? 'selected' : ''}>${t('set.informal')}</option></select></label>
+          </div>
+          ${sw('greetOnOpen', t('set.greet'))}
+          ${sw('autoSendVoice', t('set.autoSend'))}
+          <label class="switch ${voice.wakeSupported ? '' : 'disabled'}"><input type="checkbox" data-set="wakeWord" ${st.wakeWord && voice.wakeSupported ? 'checked' : ''} ${voice.wakeSupported ? '' : 'disabled'}><span></span> ${t('set.wake')} <span class="tag tag-warn">${t('set.experimental')}</span></label>
+          <div class="two">
+            <label class="field">${t('set.gender')}<select data-set="voiceGender">${Object.entries(GENDER).map(([g, k]) => `<option value="${g}" ${gF === g ? 'selected' : ''}>${t(k)}</option>`).join('')}</select></label>
+            <label class="switch" style="align-self:end"><input type="checkbox" data-set="voiceAllLangs" ${st.voiceAllLangs ? 'checked' : ''}><span></span> ${t('set.allLangs')}</label>
+          </div>
+          <div class="two">
+            <label class="field">${t('set.rate')} <output>${st.rate.toFixed(1)}</output><input type="range" min="0.6" max="1.6" step="0.1" data-set="rate" value="${st.rate}"></label>
+            <label class="field">${t('set.pitch')} <output>${st.pitch.toFixed(1)}</output><input type="range" min="0.5" max="1.5" step="0.1" data-set="pitch" value="${st.pitch}"></label>
+            <label class="field">${t('set.volume')} <output>${Math.round((st.volume ?? 1) * 100)} %</output><input type="range" min="0" max="1" step="0.05" data-set="volume" value="${st.volume ?? 1}"></label>
+          </div>
+          <p class="muted small" data-stt-info>${voice.sttEngine === 'agent' ? t('set.sttAgent') : voice.sttEngine === 'web' ? t('set.sttWeb') : esc(voice.sttReason || '')} ${t('set.voicesFound', { n: langVoices.length })}</p>`)}
       </section>
 
-      <section class="card glass">
-        <header class="card-head"><h2>Daten</h2><span class="muted small">${store.sizeKB()} KB lokal</span></header>
-        <p class="muted small">Alle Daten liegen ausschließlich im Speicher dieses Browsers (localStorage). Es gibt keinen Server und kein Konto. Passwörter werden nie gespeichert.</p>
-        <div class="row-actions">
-          <button class="btn btn-ghost" data-act="data-export">Backup exportieren</button>
-          <label class="btn btn-ghost">Backup importieren<input type="file" accept="application/json" data-change="data-import" hidden></label>
-          <button class="btn btn-ghost danger-text" data-act="data-reset">Alles zurücksetzen</button>
-        </div>
+      <section class="card" data-sec="datenschutz">
+        <header class="card-head"><h2>${icon('lock')} ${t('set.privacy')}</h2><span class="muted small">${t('set.kbLocal', { n: store.sizeKB() })}</span></header>
+        <p class="muted small">${t('set.privacyText')}</p>
+        <label class="switch"><input type="checkbox" data-set="searchHistory" ${st.searchHistory !== false ? 'checked' : ''}><span></span> ${t('set.searchHistory')}</label>
+        <div class="row-actions"><button class="btn btn-ghost btn-sm" data-act="data-export">${t('set.export')}</button></div>
+        ${adv(`<div class="row-actions">
+            <label class="btn btn-ghost btn-sm">${t('set.import')}<input type="file" accept="application/json" data-change="data-import" hidden></label>
+            ${window.__TAURI__?.autostart ? `<button class="btn btn-ghost btn-sm" data-act="autostart-on">${t('set.autostartOn')}</button><button class="btn btn-ghost btn-sm" data-act="autostart-off">${t('set.autostartOff')}</button>` : ''}
+            <button class="btn btn-ghost btn-sm danger-text" data-act="data-reset">${t('set.reset')}</button>
+          </div>
+          ${window.__TAURI__?.autostart ? '' : `<p class="muted small">${t('set.autostartOnly')}</p>`}`)}
       </section>
 
-      <section class="card glass">
-        <header class="card-head"><h2>Windows-App</h2><span class="tag ${window.__TAURI__ ? 'tag-ok' : ''}">${window.__TAURI__ ? 'Desktop-App' : 'Browser'}</span></header>
-        ${window.__TAURI__?.autostart ? `<p class="muted small">Autostart startet CARVIS CORE beim Anmelden.</p><button class="btn" data-act="autostart-on">Autostart einschalten</button> <button class="btn" data-act="autostart-off">Autostart ausschalten</button>` : '<p class="muted small">Autostart und Tray-Symbol gibt es nur in der installierten Windows-App (nicht im Browser).</p>'}
-      </section>
-
-      <section class="card glass">
-        <header class="card-head"><h2>Update Center</h2></header>
-        <p class="muted small">Updates suchen, Änderungsprotokoll lesen, geprüftes Paket herunterladen.</p>
-        <button class="btn btn-primary" data-go="#/gpt/update">Update Center öffnen</button>
-      </section>
-
-      <section class="card glass">
-        <header class="card-head"><h2>Über CARVIS CORE</h2></header>
-        <p class="muted small">CARVIS CORE · Budget 0,00 € · reine Web-App (HTML/CSS/JS), installierbar als PWA. Simulierte Funktionen sind immer als „simuliert“ gekennzeichnet.</p>
+      <section class="card" data-sec="updates">
+        <header class="card-head"><h2>${icon('update')} ${t('set.updates')}</h2></header>
+        <p class="muted small" data-version>${t('set.installed', { v: esc(displayVersion()), kind: window.__TAURI__ ? t('set.winApp') : t('set.browser') })}</p>
+        <div class="row-actions"><button class="btn btn-sm" data-go="#/gpt/update">${t('set.checkUpdates')}</button><button class="btn btn-ghost btn-sm" data-go="#/gpt/health">${t('set.health')}</button></div>
       </section>
     </div>`;
   },
   onChange(el, ctx) {
+    if (el.matches('[data-ui-lang]')) {
+      const code = el.value;
+      if (code !== lang()) { actions.setSettings({ uiLang: code, lang: langInfo(code).speech, voiceName: '' }); setLang(code); }
+      return;
+    }
     if (el.dataset.set) {
       const key = el.dataset.set;
       let val = el.type === 'checkbox' ? el.checked : el.type === 'range' ? parseFloat(el.value) : el.value;
       if (key === 'userName') val = val.trim();
+      if (key === 'searchHistory' && !val) { try { localStorage.removeItem('ccc.search.history'); } catch { /* privat */ } }
       actions.setSettings({ [key]: val });
       if (key === 'wakeWord' || key === 'reduceMotion') ctx.applySettings();
       if (key === 'voiceGender' || key === 'voiceAllLangs' || key === 'lang') ctx.rerender();
@@ -107,15 +123,23 @@ export default {
   async onAct(act, el, ctx) {
     const s = store.get().settings;
     if (act === 'autostart-on' || act === 'autostart-off') {
-      try { await window.__TAURI__.autostart[act === 'autostart-on' ? 'enable' : 'disable'](); toast(act === 'autostart-on' ? 'Autostart eingeschaltet.' : 'Autostart ausgeschaltet.', 'info'); }
-      catch (e) { toast('Autostart nicht möglich: ' + (e?.message || e), 'danger'); }
+      try { await window.__TAURI__.autostart[act === 'autostart-on' ? 'enable' : 'disable'](); toast(t(act === 'autostart-on' ? 'set.autostartOnDone' : 'set.autostartOffDone'), 'info'); }
+      catch (e) { toast(t('set.autostartFail', { e: e?.message || e }), 'danger'); }
     }
-    if (act === 'tts-test') ctx.speak('Hallo. Ich bin CARVIS. Wie kann ich dir heute helfen? Ich spreche mit den Einstellungen, die du gerade gewählt hast.');
+    if (act === 'set-mode') {
+      actions.setSettings({ theme: { ...(s.theme || {}), mode: el.dataset.mode } });
+      applyTheme(store.get().settings.theme);
+      document.dispatchEvent(new Event('cc-theme'));
+      ctx.rerender();
+      return;
+    }
+    if (act === 'set-model') { modelMenu(el, () => { const b = document.querySelector('[data-set-model]'); if (b) b.textContent = modelLabel(store.get()); }); return; }
+    if (act === 'tts-test') ctx.speak(t('set.testVoiceText'));
     if (act === 'data-export') download(`ccc-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(store.get(), null, 2), 'application/json');
-    if (act === 'data-reset' && (await confirmDialog('Wirklich ALLE lokalen Daten (Chat, Projekte, Aufgaben, Dokumente, Gedächtnis, Einstellungen) löschen? Das kann nicht rückgängig gemacht werden.', { ok: 'Alles löschen' }))) {
+    if (act === 'data-reset' && (await confirmDialog(t('set.resetAsk'), { ok: t('set.resetOk') }))) {
       store.reset();
       ctx.applySettings();
-      toast('Zurückgesetzt');
+      toast(t('set.resetDone'));
     }
   },
 };
@@ -126,12 +150,12 @@ async function importBackup(input) {
   try {
     const data = JSON.parse(await file.text());
     if (!data || typeof data !== 'object' || !Array.isArray(data.tasks) || !Array.isArray(data.projects)) throw new Error('Format');
-    if (await confirmDialog('Backup importieren? Die aktuellen lokalen Daten werden ersetzt.', { ok: 'Importieren' })) {
+    if (await confirmDialog(t('set.importAsk'), { ok: t('set.importOk') })) {
       store.replace(data);
-      toast('Backup importiert', 'ok');
+      toast(t('set.imported'), 'ok');
     }
   } catch {
-    toast('Ungültige Backup-Datei', 'danger');
+    toast(t('set.importBad'), 'danger');
   }
   input.value = '';
 }

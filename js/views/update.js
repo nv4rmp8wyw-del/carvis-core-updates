@@ -3,20 +3,21 @@
 import { esc, relTime } from '../util.js';
 import { actions, store } from '../store.js';
 import { confirmDialog, toast, icon } from '../ui.js';
-import { VERSION, BUILD } from '../version.js';
-import { checkUpdate, listStableReleases, downloadVerified, UpdateError, cmpVer, currentVersion } from '../update.js';
+import { VERSION, displayVersion, shortVersion } from '../version.js';
+import { checkUpdate, listStableReleases, downloadVerified, UpdateError, cmpVer, currentVersion, isTestVer } from '../update.js';
 import { agentClient } from '../agent-client.js';
+import { t, lang } from '../i18n.js';
 
 const P = { st: null, login: null, rel: null, dl: null, err: '', busy: '', confirm: false, checked: false };
 const mb = (n) => (n / 1048576).toFixed(1);
-const S = { advOpen: false, info: null, releases: [], previous: null, error: '', busy: '', progress: 0, file: null, url: '', checked: false };
+const S = { advOpen: false, info: null, releases: [], error: '', busy: '', progress: 0, file: null, url: '', checked: false };
 const audit = (event, detail = '') => actions.setSettings({ updateAudit: [...((store.get().settings || {}).updateAudit || []), { t: Date.now(), ev: event, detail: String(detail).slice(0, 160) }].slice(-60) });
 
 async function installRelease(release, ctx) {
-  if (!agentClient.connected) throw new UpdateError('Für die Installation direkt in der App muss der integrierte Agent verbunden sein.');
+  if (!agentClient.connected) throw new UpdateError(t('upd.errNeedAgent'));
   const response = await agentClient.updPublicCheck();
   const available = (response.releases || []).find((r) => r.tag === release.tag && r.installer && r.sums);
-  if (!available) throw new UpdateError('Version derzeit nicht im offiziellen Update-Kanal verfügbar.');
+  if (!available) throw new UpdateError(t('upd.errNotInChannel'));
   let dl = await agentClient.updPublicDownload(available.installer.id, available.sums.id, available.installer.name);
   while (dl.state === 'lädt') {
     await new Promise((r) => setTimeout(r, 400));
@@ -24,67 +25,69 @@ async function installRelease(release, ctx) {
     S.progress = dl.total ? Math.min(100, Math.round(100 * dl.received / dl.total)) : 0;
     ctx.rerender();
   }
-  if (dl.state !== 'fertig' || !dl.verified) throw new UpdateError(dl.error || 'Update konnte nicht verifiziert werden.');
+  if (dl.state !== 'fertig' || !dl.verified) throw new UpdateError(dl.error || t('upd.errNotVerified'));
   audit('Update-Datei geprüft', available.installer.name);
   await agentClient.updInstall(available.installer.name);
   audit('Installation gestartet', release.tag);
-  toast('CARVIS CORE wird aktualisiert und startet anschließend neu.', 'info');
+  toast(t('upd.restarting'), 'info');
 }
 
 export default {
   id: 'update',
-  title: 'Updates',
+  get title() { return t('upd.title'); },
   icon: 'bolt',
   render(st) {
     const s = (st && st.settings) || store.get().settings || {};
-    const latest = S.info;
+    // TEST-App (Kennung de.carviscore.app.test, vom Agenten gemeldet): Updates NUR über den privaten Testkanal –
+    // nie ein öffentlicher STABLE-Installer (der würde eine zweite, andere App installieren).
+    const testApp = !!P.st?.testApp;
+    const latest = testApp ? null : S.info;
     const available = latest?.state === 'available' ? S.releases.find((r) => r.version === latest.latest && cmpVer(r.version, VERSION) > 0) : null;
-    const prev = latest?.state === 'current' ? S.previous : null;
-    const label = !S.checked ? 'Wird geprüft …' : S.error ? 'Zurzeit nicht erreichbar' : available ? available.version : latest?.state === 'none' ? 'Noch keine Version verfügbar' : VERSION;
+    const label = !S.checked ? t('upd.checking') : S.error ? t('upd.unreachable') : available ? displayVersion(available.version) : latest?.state === 'none' ? t('upd.none') : displayVersion();
     return `<div class='page cc-updates' data-cc-updates='true'>
-      <header class='page-head'><div><p class='eyebrow'>CARVIS CORE</p><h1>Updates</h1>
-        <p class='muted'>Immer auf dem aktuellen Stand. Ohne GitHub-Anmeldung.</p></div></header>
+      <header class='page-head'><div><p class='eyebrow'>CARVIS CORE</p><h1>${t('upd.title')}</h1>
+        <p class='muted'>${testApp ? t('upd.subTest') : t('upd.subStable')}</p></div></header>
       <section class='card glass cc-update-panel'>
         <div class='cc-update-heading'><img class='cc-update-symbol' src='icons/mark.svg' alt='' width='40' height='40'>
-          <div><h2>CARVIS CORE</h2><p>Deine Anwendung</p></div></div>
-        <div class='cc-version-row'><span>Installiert</span><strong data-cur${BUILD ? ` title="interne Build-Nummer ${BUILD}"` : ''}>${esc(VERSION)}</strong></div>
-        <div class='cc-version-row'><span>Neueste Version</span><strong data-latest>${esc(label)}</strong></div>
+          <div><h2>${testApp ? 'CARVIS CORE TEST' : 'CARVIS CORE'}</h2><p>${testApp ? t('upd.testApp') : t('upd.app')}</p></div></div>
+        <div class='cc-version-row'><span>${t('upd.installed')}</span><strong data-cur>${esc(displayVersion())}</strong></div>
+        ${testApp ? `<div class='cc-version-row'><span>${t('upd.channel')}</span><strong data-kanal>${t('upd.channelTest')}</strong></div>` : `<div class='cc-version-row'><span>${t('upd.latest')}</span><strong data-latest>${esc(label)}</strong></div>`}
         ${S.error ? `<p class='cc-update-error' role='alert'>${esc(S.error)}</p>` : ''}
-        ${S.busy === 'install' ? `<p class='cc-update-progress' role='status'>Update wird vorbereitet … ${S.progress}%</p>` : ''}
+        ${S.busy === 'install' ? `<p class='cc-update-progress' role='status'>${t('upd.preparing', { pct: S.progress })}</p>` : ''}
         <div class='cc-update-actions'>
-          ${available ? `<button class='btn btn-primary' data-act='update-apply' ${S.busy ? 'disabled' : ''}>${S.busy === 'install' ? 'Aktualisiere …' : 'Jetzt aktualisieren'}</button>` : ''}
-          ${!available && S.checked && !S.error && latest?.state === 'current' ? `<p class='cc-current'>CARVIS CORE ist aktuell.</p>` : ''}
-          <button class='btn cc-check' data-act='update-check' ${S.busy ? 'disabled' : ''}>${S.busy === 'check' ? 'Prüfe …' : 'Erneut prüfen'}</button>
+          ${available ? `<button class='btn btn-primary' data-act='update-apply' ${S.busy ? 'disabled' : ''}>${S.busy === 'install' ? t('upd.updating') : t('upd.now')}</button>` : ''}
+          ${!available && S.checked && !S.error && latest?.state === 'current' ? `<p class='cc-current'>${t('upd.current')}</p>` : ''}
+          ${testApp ? '' : `<button class='btn cc-check' data-act='update-check' ${S.busy ? 'disabled' : ''}>${S.busy === 'check' ? t('upd.checkBusy') : t('upd.check')}</button>`}
         </div>
-        ${prev ? `<div class='cc-previous'><span>Die vorherige Version ist ${esc(prev.version)}.</span>
-          <button class='btn cc-previous-button' data-act='update-previous' ${S.busy ? 'disabled' : ''}>Vorherige Version installieren</button></div>` : ''}
-        ${S.file && S.url ? `<p class='cc-update-manual'>Download geprüft. <a href='${S.url}' download='${esc(S.file.name)}'>Installer speichern</a></p>` : ''}
+        ${S.file && S.url ? `<p class='cc-update-manual'>${t('upd.saved')} <a href='${S.url}' download='${esc(S.file.name)}'>${t('upd.saveInstaller')}</a></p>` : ''}
       </section>
-      <details class='card glass upd-adv' ${S.advOpen ? 'open' : ''} data-adv><summary>Erweitert</summary>
-        <label class="switch"><input type="checkbox" data-set-update="updatePrivate" ${s.updatePrivate ? 'checked' : ''}><span></span> Entwicklerkanal anzeigen (nur für Entwickler)</label>
-        ${s.updatePrivate ? `        <section class="card" data-private-update>
-          <header class="card-head"><h2>Privater Entwicklerkanal</h2></header>
-          ${!agentClient.connected ? `<p class="notice notice-warn">Dafür wird der Agent gebraucht (in der Windows-App automatisch verbunden).</p>` : `
-          <p class="muted small">Anmeldung bei GitHub über einen Gerätecode. Das Zugriffstoken bleibt im Agenten (unter Windows mit dem Benutzerkonto verschlüsselt) und wird nie angezeigt. Installiert wird nur nach deinem Klick, nur eine mit SHA-256 geprüfte Datei.</p>
+      <details class='card glass upd-adv' ${S.advOpen || testApp ? 'open' : ''} data-adv><summary>${t('common.advanced')}</summary>
+        ${testApp ? '' : `<label class="switch"><input type="checkbox" data-set-update="updatePrivate" ${s.updatePrivate ? 'checked' : ''}><span></span> ${t('upd.devChannel')}</label>`}
+        ${s.updatePrivate || testApp ? `        <section class="card" data-private-update>
+          <header class="card-head"><h2>${t('upd.privTitle')}</h2></header>
+          ${!agentClient.connected ? `<p class="notice notice-warn">${t('upd.needAgent')}</p>` : `
+          <p class="muted small">${t('upd.loginText')}</p>
           ${P.err ? `<div class="notice notice-warn" data-priv-error>${esc(P.err)}</div>` : ''}
-          ${!P.st?.loggedIn ? (P.login ? `<div class="notice" data-priv-code>Öffne <b>${esc(P.login.verificationUri)}</b> und gib den Code <b style="font-size:1.3rem;letter-spacing:.1em">${esc(P.login.userCode)}</b> ein. Diese Seite wartet auf deine Bestätigung …</div>
-            <button class="btn" data-act="priv-cancel">Abbrechen</button>` : `<div class="inline-fields"><label class="field">Client-ID der GitHub App<input id="priv-client" type="text" value="${esc(P.clientDraft ?? P.st?.clientId ?? '')}" placeholder="Iv1.… oder Iv23…"></label></div>
-            <button class="btn btn-primary" data-act="priv-login" ${P.busy ? 'disabled' : ''}>Mit GitHub anmelden</button>`)
-          : `<p class="small"><span class="led led-ok"></span> Angemeldet${P.st.tokenProtected ? ' (Token verschlüsselt)' : ' (Token lokal, nicht verschlüsselt)'} · Version ${esc(currentVersion())}</p>
-            <button class="btn btn-primary" data-act="priv-check" ${P.busy ? 'disabled' : ''}>${P.busy === 'check' ? 'Suche …' : 'Nach privaten Updates suchen'}</button>
-            <button class="btn" data-act="priv-logout" ${P.busy ? 'disabled' : ''}>Abmelden</button>
-            ${P.checked && !P.rel ? '<p class="small" data-priv-none>Kein neueres Update vorhanden.</p>' : ''}
-            ${P.rel ? `<div class="notice" data-priv-rel><b>${esc(P.rel.name)}</b> (${esc(P.rel.tag)}, ${mb(P.rel.installer.size || 0)} MB) ist neuer als deine Version.${P.rel.notes ? `<pre class="small" style="white-space:pre-wrap">${esc(P.rel.notes)}</pre>` : ''}
-              ${!P.rel.sums ? '<p class="small"><b>Keine Prüfsumme im Release – Download gesperrt.</b></p>' : !P.dl || P.dl.state === 'fehler' || P.dl.state === 'leer' ? `<button class="btn btn-primary" data-act="priv-download">Jetzt herunterladen</button>` : ''}
-              ${P.dl?.state === 'lädt' ? `<div role="progressbar" style="height:8px;border-radius:6px;background:rgba(255,255,255,.1);overflow:hidden"><div style="width:${P.dl.total ? Math.round(100 * P.dl.received / P.dl.total) : 5}%;height:100%;background:var(--cyan)"></div></div><p class="small">Lade … ${mb(P.dl.received || 0)} MB</p>` : ''}
+          ${!P.st?.loggedIn ? (P.login ? `<div class="notice" data-priv-code>${t('upd.code', { uri: `<b>${esc(P.login.verificationUri)}</b>`, code: `<b style="font-size:1.3rem;letter-spacing:.1em">${esc(P.login.userCode)}</b>` })}</div>
+            <button class="btn" data-act="priv-cancel">${t('common.cancel')}</button>` : `<div class="inline-fields"><label class="field">${t('upd.clientId')}<input id="priv-client" type="text" value="${esc(P.clientDraft ?? P.st?.clientId ?? '')}" placeholder="${esc(t('upd.clientPh'))}"></label></div>
+            <button class="btn btn-primary" data-act="priv-login" ${P.busy ? 'disabled' : ''}>${t('upd.login')}</button>`)
+          : `<p class="small"><span class="led led-ok"></span> ${t('upd.loggedIn')}${P.st.tokenProtected ? t('upd.tokenEnc') : t('upd.tokenPlain')} · ${esc(t('upd.version', { v: shortVersion(currentVersion()) }))}</p>
+            <button class="btn btn-primary" data-act="priv-check" ${P.busy ? 'disabled' : ''}>${P.busy === 'check' ? t('upd.searching') : t('upd.searchPriv')}</button>
+            <button class="btn" data-act="priv-logout" ${P.busy ? 'disabled' : ''}>${t('upd.logout')}</button>
+            ${P.checked && !P.rel ? `<p class="small" data-priv-none>${t('upd.noNewer')}</p>` : ''}
+            ${P.rel ? `<div class="notice" data-priv-rel>${t('upd.newer', { v: `<b>${esc(displayVersion(P.rel.tag))}</b>`, build: '', mb: mb(P.rel.installer.size || 0) })}${P.rel.notes ? `<pre class="small" style="white-space:pre-wrap">${esc(P.rel.notes)}</pre>` : ''}
+              ${!P.rel.sums ? `<p class="small"><b>${t('upd.noSums')}</b></p>` : !P.dl || P.dl.state === 'fehler' || P.dl.state === 'leer' ? `<button class="btn btn-primary" data-act="priv-download">${t('upd.download')}</button>` : ''}
+              ${P.dl?.state === 'lädt' ? `<div role="progressbar" style="height:8px;border-radius:6px;background:rgba(255,255,255,.1);overflow:hidden"><div style="width:${P.dl.total ? Math.round(100 * P.dl.received / P.dl.total) : 5}%;height:100%;background:var(--cyan)"></div></div><p class="small">${t('upd.loading', { mb: mb(P.dl.received || 0) })}</p>` : ''}
               ${P.dl?.state === 'fehler' ? `<p class="small" data-priv-dlerr>${esc(P.dl.error)}</p>` : ''}
-              ${P.dl?.state === 'fertig' ? `<p class="small" data-priv-verified><b>Prüfsumme bestätigt</b> (SHA-256 ${esc((P.dl.sha256 || '').slice(0, 16))}…).</p>
-                ${P.confirm ? `<p class="small">CARVIS CORE schließt sich, installiert still und startet neu. Deine Daten werden vorher gesichert und bleiben erhalten.</p><button class="btn btn-primary" data-act="priv-install">Ja, jetzt installieren</button> <button class="btn" data-act="priv-noinstall">Abbrechen</button>` : `<button class="btn btn-primary" data-act="priv-askinstall">Installieren …</button>`}` : ''}
+              ${P.dl?.state === 'fertig' ? `<p class="small" data-priv-verified>${t('upd.verified', { sha: esc((P.dl.sha256 || '').slice(0, 16)) })}</p>
+                ${P.confirm ? `<p class="small">${isTestVer(P.rel.tag) && !P.st?.testApp
+                  ? t('upd.confirmTest')
+                  : t('upd.confirmSelf')}</p><button class="btn btn-primary" data-act="priv-install">${t('upd.yesInstall')}</button> <button class="btn" data-act="priv-noinstall">${t('common.cancel')}</button>` : `<button class="btn btn-primary" data-act="priv-askinstall">${t('upd.install')}</button>`}` : ''}
             </div>` : ''}`}`}
         </section>` : ''}
-        ${(s.updateAudit || []).length ? `<div class="upd-adv-block" data-audit><h3 class="small">Update-Protokoll</h3><ul class="status-list small">${[...s.updateAudit].reverse().slice(0, 12).map((e) => `<li><span class="k">${new Date(e.t).toLocaleString('de-DE')}</span><span class="v">${esc(e.ev)}${e.detail ? ' · ' + esc(e.detail) : ''}</span></li>`).join('')}</ul></div>` : ''}
+        ${(s.updateAudit || []).length ? `<div class="upd-adv-block" data-audit><h3 class="small">${t('upd.log')}</h3><ul class="status-list small">${[...s.updateAudit].reverse().slice(0, 12).map((e) => `<li><span class="k">${new Date(e.t).toLocaleString(lang())}</span><span class="v">${esc(e.ev)}${e.detail ? ' · ' + esc(e.detail) : ''}</span></li>`).join('')}</ul></div>` : ''}
       </details>
-      <p class='cc-update-footnote'>Die Installation bewahrt deine Einstellungen. Bei Problemen bleiben Sicherung und technische Wiederherstellung erhalten.</p>
+      <p class='cc-update-footnote'>${t('upd.footnote')}</p>
     </div>`;
   },
   onChange(el, ctx) {
@@ -111,7 +114,7 @@ export default {
             if (!P.login) break;
             const r = await agentClient.updLoginPoll();
             if (r.state === 'angemeldet') { P.login = null; P.st = await agentClient.updStatus(); audit('Private Anmeldung abgeschlossen'); break; }
-            if (r.state === 'abgelaufen' || r.state === 'abgelehnt') { P.login = null; P.err = r.state === 'abgelehnt' ? 'Anmeldung abgelehnt.' : 'Der Code ist abgelaufen. Bitte neu anmelden.'; break; }
+            if (r.state === 'abgelaufen' || r.state === 'abgelehnt') { P.login = null; P.err = r.state === 'abgelehnt' ? t('upd.loginDenied') : t('upd.codeExpired'); break; }
             if (r.interval && P.login) P.login.interval = r.interval;
           }
         }
@@ -120,7 +123,8 @@ export default {
         if (act === 'priv-check') {
           P.busy = 'check'; P.rel = null; P.dl = null; P.confirm = false; rr();
           const r = await agentClient.updCheck(); const cur = currentVersion();
-          P.rel = (r.releases || []).filter((x) => cmpVer(x.tag, cur) > 0).sort((a, b) => cmpVer(b.tag, a.tag))[0] || null; P.checked = true;
+          // TEST-App: nur Testbuilds (-test.N) – ein STABLE-Installer würde eine andere App installieren
+          P.rel = (r.releases || []).filter((x) => cmpVer(x.tag, cur) > 0 && (!P.st?.testApp || isTestVer(x.tag))).sort((a, b) => cmpVer(b.tag, a.tag))[0] || null; P.checked = true;
           audit('Private Update-Suche', P.rel ? `neu: ${P.rel.tag}` : 'nichts Neueres');
         }
         if (act === 'priv-download' && P.rel) {
@@ -131,7 +135,7 @@ export default {
         }
         if (act === 'priv-askinstall') P.confirm = true;
         if (act === 'priv-noinstall') P.confirm = false;
-        if (act === 'priv-install' && P.rel) { audit('Installation gestartet (auf Klick)', P.rel.tag); P.confirm = false; await agentClient.updInstall(P.rel.installer.name); toast('CARVIS CORE wird aktualisiert und startet neu.', 'info'); }
+        if (act === 'priv-install' && P.rel) { audit('Installation gestartet (auf Klick)', P.rel.tag); P.confirm = false; await agentClient.updInstall(P.rel.installer.name); toast(t('upd.restarting'), 'info'); }
       } catch (e) { P.err = e.message || String(e); P.login = act === 'priv-login' ? null : P.login; }
       P.busy = ''; rr(); return;
     }
@@ -142,33 +146,30 @@ export default {
         const [info, releases] = await Promise.all([checkUpdate(), listStableReleases()]);
         S.info = info; S.releases = releases; S.checked = true;
         const newest = releases[0];
-        S.previous = newest && cmpVer(VERSION, newest.version) >= 0 ? releases.find((r) => cmpVer(r.version, VERSION) < 0) || null : null;
         audit('Update-Prüfung', newest?.version || 'Kein veröffentlichtes Update');
         actions.setSettings({ lastUpdateCheck: Date.now() });
-      } catch (e) { S.checked = true; S.error = e instanceof UpdateError ? e.message : 'Die Updateprüfung ist momentan nicht möglich.'; audit('Updateprüfung fehlgeschlagen', S.error); }
+      } catch (e) { S.checked = true; S.error = e instanceof UpdateError ? e.message : t('upd.checkFailed'); audit('Updateprüfung fehlgeschlagen', S.error); }
       S.busy = ''; ctx.rerender(); return;
     }
-    if (action === 'update-apply' || action === 'update-previous') {
+    if (action === 'update-apply' && P.st?.testApp) { toast(t('upd.testOnly'), 'info'); return; }
+    if (action === 'update-apply') {
       if (S.busy) return;
-      const target = action === 'update-apply' ? S.releases[0] : S.previous;
+      const target = S.releases[0]; // nur die neueste öffentliche STABLE – kein Benutzer-Downgrade (Inhaber-Auftrag 16.11.)
+      if (!target || cmpVer(target.version, VERSION) <= 0) { toast(t('upd.current'), 'info'); return; } // nie gleiche oder ältere Version installieren
       if (!target) return;
-      if (action === 'update-previous') {
-        const ok = await confirmDialog(`Die vorherige Version ${target.version} installieren? Deine Einstellungen werden gesichert.`, { ok: 'Installieren' });
-        if (!ok) return;
-      }
       S.busy = 'install'; S.error = ''; S.progress = 0; ctx.rerender();
       try {
         if (agentClient.connected) await installRelease(target, ctx);
         else if (action === 'update-apply') {
           // In der Webansicht ohne Desktop-Agent nur verifizierter manueller Download.
           const info = S.info;
-          if (!info?.installer || !info.sums) throw new UpdateError('Kein überprüfbares Installationspaket vorhanden.');
+          if (!info?.installer || !info.sums) throw new UpdateError(t('upd.noPackage'));
           S.file = await downloadVerified(info, { onProgress: (n,t) => { S.progress = t ? Math.round(100*n/t) : 0; ctx.rerender(); } });
           if (S.url) URL.revokeObjectURL(S.url);
           S.url = URL.createObjectURL(S.file.blob);
           audit('Installer zum Speichern geprüft', S.file.name);
-        } else throw new UpdateError('Die vorherige Version kann nur in der Windows-App installiert werden.');
-      } catch (e) { S.error = e instanceof UpdateError ? e.message : (e?.message || 'Update fehlgeschlagen.'); audit('Installation fehlgeschlagen', S.error); }
+        } else throw new UpdateError(t('upd.prevOnlyApp'));
+      } catch (e) { S.error = e instanceof UpdateError ? e.message : (e?.message || t('upd.failed')); audit('Installation fehlgeschlagen', S.error); }
       S.busy = ''; ctx.rerender(); return;
     }
   },

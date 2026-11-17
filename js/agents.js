@@ -4,6 +4,12 @@ import { store, actions } from './store.js';
 import { agentClient } from './agent-client.js';
 import { wikiSearch } from './ai/research.js';
 import { aiOverview } from './views/models.js';
+import { ai } from './ai/autoconnect.js';
+import { health } from './health.js';
+import { voice } from './voice.js';
+const aiPhase = () => ai.phase;
+const healthStopped = () => health.stopped;
+const voiceReady = () => !!(voice.sttSupported || voice.ttsSupported);
 
 export const STATUS = {
   aktiv: { label: 'BEREIT', cls: 'tag-ok' },
@@ -17,15 +23,19 @@ export const STATUS = {
 
 /** Jeder Agent: was er wirklich kann und welchen Status er gerade hat. */
 export const AGENTS = [
-  { id: 'research', name: 'Research Agent', icon: 'globe', desc: 'Recherchiert in der Wikipedia und nennt Quellen. Keine KI-Zusammenfassung ohne Modell.', status: () => (navigator.onLine ? 'aktiv' : 'geplant'), go: '#/gpt/chat' },
-  { id: 'coding', name: 'Coding Agent', icon: 'code', desc: 'Schreibt und erklärt Code über ein verbundenes KI-Modell (Chat). Ohne Modell nur simulierte Antworten.', status: (s) => (aiOverview(s).available ? 'aktiv' : 'modell'), go: '#/gpt/models' },
-  { id: 'computer', name: 'Computer Agent', icon: 'dashboard', desc: 'Systemdaten, Netzwerkdiagnose und freigegebene Ordner über den lokalen Desktop-Agenten.', status: () => (agentClient.connected ? 'aktiv' : 'agent'), go: '#/gpt/computer' },
-  { id: 'browser', name: 'Browser Agent', icon: 'globe', desc: 'Webseiten bedienen und Formulare ausfüllen. Noch nicht implementiert.', status: () => 'geplant' },
-  { id: 'finance', name: 'Finance Agent', icon: 'doc', desc: 'Budget, Sparpotenzial, Szenarien und Risikorechner. Rechnet lokal, gibt keine Anlageempfehlung.', status: () => 'aktiv', go: '#/gpt/finance' },
-  { id: 'shopping', name: 'Shopping Agent', icon: 'task', desc: 'Einkaufsliste mit Preisvergleich nach deinen Eingaben und Zielpreis. Automatische Preise sind nicht verfügbar.', status: () => 'aktiv', go: '#/gpt/finance' },
-  { id: 'productivity', name: 'Productivity Agent', icon: 'project', desc: 'Aufgaben, Projekte, Dokumente und Übersichten.', status: () => 'aktiv', go: '#/gpt/tasks' },
-  { id: 'assistant', name: 'Personal Assistant Agent', icon: 'core', desc: 'Gespräch, Sprache und gemeinsames Gedächtnis. Kalender- und E-Mail-Anbindung sind nicht verbunden.', status: () => 'aktiv', go: '#/carvis' },
-  { id: 'qa', name: 'Quality Assurance Agent', icon: 'preview', desc: 'Prüft Ergebnisse von Abläufen auf Lücken (leer, ohne Quellen, unplausible Zahlen). Regelbasiert.', status: () => 'aktiv' },
+  { id: 'research', name: 'Research Agent', icon: 'globe', desc: 'Recherchiert in der Wikipedia und nennt Quellen. Keine KI-Zusammenfassung ohne Modell.', status: () => (navigator.onLine ? 'aktiv' : 'geplant'), go: '#/gpt/chat' , perm: 'nur lesend (Wikipedia, öffentliche Seiten über den Agenten)', limit: 'Zeitlimit 60 s je Schritt' },
+  { id: 'coding', name: 'Coding Agent', icon: 'code', desc: 'Schreibt und erklärt Code über ein verbundenes KI-Modell (Chat). Ohne Modell nur simulierte Antworten.', status: (s) => (aiOverview(s).available ? 'aktiv' : 'modell'), go: '#/gpt/models' , perm: 'nur Text; Dateien schreiben nur nach Bestätigung', limit: 'ein lokales Modell zur Zeit' },
+  { id: 'computer', name: 'Computer Agent', icon: 'dashboard', desc: 'Systemdaten, Netzwerkdiagnose und freigegebene Ordner über den lokalen Desktop-Agenten.', status: () => (agentClient.connected ? 'aktiv' : 'agent'), go: '#/gpt/computer' , perm: 'Lesen in freigegebenen Ordnern; Änderungen nur nach Vorschau und Freigabe', limit: 'Zeitlimit 60 s je Schritt, Not-Stopp' },
+  { id: 'browser', name: 'Browser Agent', icon: 'globe', desc: 'Webseiten bedienen und Formulare ausfüllen. Noch nicht implementiert.', status: () => 'geplant' , perm: '–', limit: '–' },
+  { id: 'finance', name: 'Finance Agent', icon: 'doc', desc: 'Budget, Sparpotenzial, Szenarien und Risikorechner. Rechnet lokal, gibt keine Anlageempfehlung.', status: () => 'aktiv', go: '#/gpt/finance' , perm: 'rechnet lokal, keine Zahlungen, keine Anlageempfehlung', limit: '–' },
+  { id: 'shopping', name: 'Shopping Agent', icon: 'task', desc: 'Einkaufsliste mit Preisvergleich nach deinen Eingaben und Zielpreis. Automatische Preise sind nicht verfügbar.', status: () => 'aktiv', go: '#/gpt/finance' , perm: 'nur deine Eingaben, keine Käufe', limit: '–' },
+  { id: 'productivity', name: 'Productivity Agent', icon: 'project', desc: 'Aufgaben, Projekte, Dokumente und Übersichten.', status: () => 'aktiv', go: '#/gpt/tasks' , perm: 'lokale Projekte/Aufgaben', limit: '–' },
+  { id: 'assistant', name: 'Personal Assistant Agent', icon: 'core', desc: 'Gespräch, Sprache und gemeinsames Gedächtnis. Kalender- und E-Mail-Anbindung sind nicht verbunden.', status: () => 'aktiv', go: '#/carvis' , perm: 'Gespräch und Gedächtnis lokal; Kalender/E-Mail nicht verbunden', limit: '–' },
+  // 4.1: vorhandene Module als Agenten sichtbar gemacht (keine neue Logik, kein Duplikat): Status aus dem echten Zustand
+  { id: 'diagnose', name: 'Diagnose-Agent', icon: 'reset', desc: 'Self-Healing: erkennt Fehler, repariert sichere bekannte Fälle, prüft danach erneut, stoppt nach 2 Versuchen.', status: () => (healthStopped() ? 'genehmigung' : 'aktiv'), go: '#/gpt/health', perm: 'nur sichere, umkehrbare Maßnahmen automatisch; alles andere mit Freigabe', limit: 'Zeitlimit je Reparatur 10–150 s, höchstens 2 Versuche' },
+  { id: 'modelle', name: 'Modell-Agent', icon: 'llm', desc: 'KI-Verbindungsmanager: findet Ollama und Modelle, wählt passend zur Hardware, bestätigt per echter Testanfrage, weicht bei Fehlern aus.', status: () => (aiPhase() === 'bereit' ? 'aktiv' : aiPhase() === 'kein-ollama' || aiPhase() === 'kein-modell' ? 'modell' : aiPhase() === 'fehler' ? 'fehler' : 'arbeitet'), go: '#/gpt/models', perm: 'Downloads nur nach Zustimmung', limit: 'Testanfrage höchstens 120 s, höchstens 3 Modelle je Prüfung' },
+  { id: 'sprache', name: 'Sprach-Agent', icon: 'mic', desc: 'Spracherkennung und -ausgabe (Browser/Windows, mit Piper und whisper.cpp, falls installiert). Mikrofon nur nach Klick bzw. Zustimmung.', status: () => (voiceReady() ? 'aktiv' : 'geplant'), go: '#/gpt/settings', perm: 'Mikrofon nur auf Klick bzw. im Gesprächsmodus, Status immer sichtbar', limit: 'Aufnahme höchstens 2 min, Erkennung höchstens 120 s' },
+  { id: 'qa', name: 'Quality Assurance Agent', icon: 'preview', desc: 'Prüft Ergebnisse von Abläufen auf Lücken (leer, ohne Quellen, unplausible Zahlen). Regelbasiert.', status: () => 'aktiv' , perm: 'prüft nur, ändert nichts', limit: 'regelbasiert' },
 ];
 
 // ---------- Qualitätsprüfung (QA-Agent) ----------

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -12,10 +12,12 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="CC">
   <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/favicon-32.png" type="image/png" sizes="32x32">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="css/cc.css">
   <link rel="modulepreload" href="js/util.js">
+  <link rel="modulepreload" href="js/i18n.js">
   <link rel="modulepreload" href="js/store.js">
   <link rel="modulepreload" href="js/core.js">
   <link rel="modulepreload" href="js/voice.js">
@@ -26,55 +28,67 @@
   <link rel="modulepreload" href="js/views/dashboard.js">
   <link rel="modulepreload" href="js/views/workspace.js">
   <link rel="modulepreload" href="js/views/gpt.js">
+  <link rel="modulepreload" href="js/views/talk.js">
+  <link rel="modulepreload" href="js/ai/autoconnect.js">
   <link rel="modulepreload" href="js/views/settings.js">
   <link rel="modulepreload" href="js/views/models.js">
 </head>
 <body>
+  <div class="splash" id="splash" aria-hidden="true"><div class="splash-inner"><div class="mini-orb"><img src="icons/mark.svg" alt=""></div><b>CARVIS CORE</b></div></div>
   <div class="ambient" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i></div>
   <div id="app" data-mode="carvis">
+    <!-- v1.2: linke Hauptnavigation (Referenz-Dashboard, D-054); Einträge rendert js/app.js (renderSidebar) -->
+    <aside class="sidebar" id="sidebar" aria-label="Navigation">
+      <a class="sb-brand" href="#/carvis" aria-label="CARVIS CORE" data-i18n-attr="aria-label:nav.home"><img src="icons/cc-orb-128.png" alt="" width="64" height="64"><b>CARVIS CORE</b></a>
+      <nav class="sb-nav" id="sb-nav" aria-label="Navigation"></nav>
+      <div class="sb-wave" aria-hidden="true"></div>
+    </aside>
     <header class="topbar">
-      <a class="brand" href="#/carvis" aria-label="CARVIS CORE – Start">
+      <a class="brand" href="#/carvis" aria-label="CARVIS CORE – Start" data-i18n-attr="aria-label:nav.home">
         <img class="brand-mark" src="icons/mark.svg" alt="" width="26" height="26">
         <span class="brand-text"><b>CARVIS CORE</b></span>
       </a>
-      <nav class="tabs" id="tabs" role="tablist" aria-label="Hauptbereiche">
+      <nav class="tabs" id="tabs" role="tablist" aria-label="Main areas" data-i18n-attr="aria-label:nav.main">
         <span class="tab-ind" aria-hidden="true"></span>
-        <a role="tab" data-area="dashboard" href="#/gpt/dashboard">Dashboard</a>
-        <a role="tab" data-area="carvis" href="#/carvis">CARVIS</a>
-        <a role="tab" data-area="gpt" href="#/gpt/chat">GPT</a>
+        <a role="tab" data-area="carvis" href="#/carvis" title="CARVIS (Strg+1)">CARVIS</a>
+        <a role="tab" data-area="chat" href="#/gpt/talk" title="Chat (Strg+2)">Chat</a>
+        <a role="tab" data-area="gpt" href="#/gpt/chat" title="GPT (Strg+3)">GPT</a>
+        <a role="tab" data-area="dashboard" href="#/gpt/dashboard" title="Dashboard (Strg+4)">Dashboard</a>
       </nav>
       <div class="topbar-right">
-        <button class="pill" id="engine-pill" data-go="#/gpt/settings" title="KI-Engine – Einstellungen öffnen"></button>
-        <span class="clock" data-clock aria-label="Uhrzeit"></span>
+        <button class="pill" id="engine-pill" data-go="#/gpt/dashboard" title="AI status" data-i18n-attr="title:nav.aiStatus"></button>
+        <div class="dl-split" id="dl-split" hidden><a class="btn btn-primary btn-sm dl-main" id="dl-main" href="#" data-i18n-attr="title:dl.unsigned"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3h2v9.2l3.3-3.3 1.4 1.4L12 16l-5.7-5.7 1.4-1.4 3.3 3.3V3ZM5 19h14v2H5v-2Z"/></svg><span data-i18n="dl.windows">Download for Windows</span></a><button type="button" class="btn btn-primary btn-sm dl-more" data-act="dl-menu" aria-haspopup="menu" aria-label="More download options" data-i18n-attr="aria-label:dl.more;title:dl.more"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5H7Z"/></svg></button></div>
+        <button class="pill lang-pill" id="lang-btn" data-act="lang-menu" aria-haspopup="menu" aria-label="Language" title="Language" data-i18n-attr="aria-label:nav.language;title:nav.language"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm6.9 6h-2.95a15.6 15.6 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.9 8ZM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96ZM4.26 14a8.2 8.2 0 0 1 0-4h3.38a16.5 16.5 0 0 0 0 4H4.26Zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.99 7.99 0 0 1 5.08 16Zm2.95-8H5.08a7.99 7.99 0 0 1 4.33-3.56A15.6 15.6 0 0 0 8.03 8ZM12 19.96A14.1 14.1 0 0 1 10.09 16h3.82A14.1 14.1 0 0 1 12 19.96ZM14.34 14H9.66a14.7 14.7 0 0 1 0-4h4.68a14.7 14.7 0 0 1 0 4Zm.25 5.56A15.6 15.6 0 0 0 15.97 16h2.95a8.03 8.03 0 0 1-4.33 3.56ZM16.36 14a16.5 16.5 0 0 0 0-4h3.38a8.2 8.2 0 0 1 0 4h-3.38Z"/></svg><b id="lang-code">EN</b><svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5H7Z"/></svg></button>
+        <button class="icon-btn" id="search-btn" data-act="search-open" aria-label="Search (Ctrl+K)" title="Search (Ctrl+K)" data-i18n-attr="aria-label:search.open;title:search.open"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 0 1 5.9 12.1l4.8 4.8-1.4 1.4-4.8-4.8A7.5 7.5 0 1 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Z"/></svg></button>
+        <button class="icon-btn" id="theme-btn" data-act="toggle-theme" aria-label="Appearance"></button>
+        <button class="icon-btn" id="more-btn" data-act="more-menu" data-area="more" aria-haspopup="menu" aria-label="More areas" title="More areas" data-i18n-attr="aria-label:nav.more;title:nav.more"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/></svg></button>
       </div>
     </header>
 
     <main class="modes" id="modes">
       <div class="modes-track" id="modes-track">
         <!-- CARVIS-MODUS -->
-        <section class="mode mode-carvis" id="mode-carvis" aria-label="CARVIS-Modus">
+        <section class="mode mode-carvis" id="mode-carvis" aria-label="CARVIS mode" data-i18n-attr="aria-label:carvis.mode">
           <div class="core-stage">
             <canvas id="core" aria-hidden="true"></canvas>
             <div class="core-hud">
-              <span class="state-chip" id="state-chip">Bereit</span>
-              <button class="stop-speak" data-act="stop-speak" aria-label="Sprachausgabe stoppen">■ Stopp</button>
+              <span class="state-chip" id="state-chip"></span>
+              <button class="stop-speak" data-act="stop-speak" aria-label="Stop speaking" data-i18n="carvis.stop" data-i18n-attr="aria-label:carvis.stopSpeak">■ Stop</button>
             </div>
+            <button type="button" class="icon-btn carvis-more" data-act="carvis-menu" aria-haspopup="menu" aria-label="More voice functions" title="Speech output, conversation mode" data-i18n-attr="aria-label:carvis.moreVoice;title:carvis.moreVoiceTitle"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/></svg></button>
           </div>
           <div class="carvis-bottom">
-            <p class="greeting" id="carvis-greeting">Hallo. Ich bin CARVIS. Was kann ich für dich erledigen?</p>
-            <button class="voice-gate" id="voice-gate" data-act="voice-gate" hidden>🔊 Tippen, damit CARVIS dich begrüßt <small>Der Browser erlaubt Sprachausgabe erst nach einer Interaktion</small></button>
+            <p class="greeting" id="carvis-greeting"></p>
+            <p class="carvis-status" id="carvis-status" aria-live="polite"></p>
+            <button class="voice-gate" id="voice-gate" data-act="voice-gate" hidden><span data-i18n="carvis.voiceGate"></span> <small data-i18n="carvis.voiceGateSmall"></small></button>
             <div class="carvis-feed" id="carvis-feed" aria-live="polite"></div>
             <div class="interim" id="interim" aria-live="polite"></div>
             <form class="composer" id="carvis-form" autocomplete="off">
-              <button type="button" class="icon-btn mic" data-act="mic" title="Spracheingabe starten/stoppen" aria-label="Spracheingabe">
+              <button type="button" class="icon-btn mic" data-act="mic" title="Start/stop voice input" aria-label="Voice input" data-i18n-attr="title:carvis.micTitle;aria-label:carvis.mic">
                 <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
               </button>
-              <input type="text" name="q" placeholder="Frag CARVIS …" aria-label="Nachricht an CARVIS" enterkeyhint="send">
-              <button type="button" class="icon-btn" data-act="toggle-tts" title="Sprachausgabe an/aus" aria-label="Sprachausgabe an/aus">
-                <svg class="ico-on" viewBox="0 0 24 24"><path d="M3 10v4h4l5 4V6L7 10H3Zm13.5 2A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z"/></svg>
-                <svg class="ico-off" viewBox="0 0 24 24"><path d="M3 10v4h4l5 4V6L7 10H3Zm13.6 2 2.7-2.7-1.4-1.4-2.7 2.7-2.7-2.7-1.4 1.4 2.7 2.7-2.7 2.7 1.4 1.4 2.7-2.7 2.7 2.7 1.4-1.4-2.7-2.7Z"/></svg>
-              </button>
-              <button type="submit" class="icon-btn send" title="Senden" aria-label="Senden">
+              <input type="text" name="q" placeholder="Ask CARVIS …" aria-label="Message to CARVIS" enterkeyhint="send" data-i18n-attr="placeholder:carvis.placeholder;aria-label:carvis.message">
+              <button type="submit" class="icon-btn send" title="Send" aria-label="Send" data-i18n-attr="title:carvis.send;aria-label:carvis.send">
                 <svg viewBox="0 0 24 24"><path d="M3 20.5 21 12 3 3.5 3 10l12 2-12 2z"/></svg>
               </button>
             </form>
@@ -87,8 +101,8 @@
         </section>
 
         <!-- GPT-MODUS -->
-        <section class="mode mode-gpt" id="mode-gpt" aria-label="GPT-Modus">
-          <nav class="subnav" id="subnav" aria-label="Unterbereiche" hidden></nav>
+        <section class="mode mode-gpt" id="mode-gpt" aria-label="GPT">
+          <nav class="subnav" id="subnav" aria-label="Sections" hidden></nav>
           <div class="view" id="view" tabindex="-1"></div>
         </section>
       </div>
@@ -101,7 +115,8 @@
   <div id="modal-root"></div>
   <div id="toast-root" aria-live="polite"></div>
 
-  <noscript><p style="padding:2rem;color:#f1efea;background:#0b0b0c">CARVIS CORE benötigt JavaScript.</p></noscript>
+  <noscript><p style="padding:2rem;color:#f1efea;background:#0b0b0c">CARVIS CORE needs JavaScript.</p></noscript>
+  <script src="js/boot-errors.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>

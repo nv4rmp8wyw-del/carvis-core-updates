@@ -12,7 +12,8 @@ export const defaultSettings = () => ({
   rate: 1,
   pitch: 1,
   volume: 1, // Lautstärke der Sprachausgabe 0…1
-  lang: 'de-DE',
+  lang: 'de-DE', // Sprache für Spracheingabe/-ausgabe (folgt der App-Sprache, D-053)
+  uiLang: null, // App-Sprache; null = Standard (Englisch)
   wakeWord: false,
   autoSendVoice: true,
   reduceMotion: false,
@@ -24,6 +25,8 @@ export const defaultSettings = () => ({
   ollamaUrl: 'http://localhost:11434',
   proxyUrl: '',
   collab: 'auto', // 'auto' | 'always' | 'never'
+  modelChoice: 'auto', // 4.1: 'auto' = CARVIS wählt; sonst Experten-ID (manuell)
+  aiAuto: null, // 4.1: zuletzt per echtem Testprompt bestätigtes Modell { model, verifiedAt, ms }
   maxExperts: 3,
   localSequential: true, // lokale Modelle nacheinander (schont den Arbeitsspeicher)
   synthesize: true,
@@ -90,6 +93,8 @@ function migrate(s) {
     }];
   }
   ['engine', 'endpoint', 'model'].forEach((k) => delete old[k]);
+  // D-053: Versionen vor dem Sprachsystem waren nur deutsch – bestehende Nutzer behalten Deutsch, neue starten auf Englisch
+  if (s.settings && !('uiLang' in old)) old.uiLang = 'de';
   return s;
 }
 
@@ -115,16 +120,34 @@ let storageOk = true;
 const listeners = new Set();
 let saveTimer = null;
 
+function writeNow() {
+  clearTimeout(saveTimer); saveTimer = null;
+  try {
+    localStorage.setItem(KEY, JSON.stringify(state));
+    storageOk = true;
+  } catch {
+    storageOk = false;
+  }
+}
 function persist() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(state));
-      storageOk = true;
-    } catch {
-      storageOk = false;
-    }
-  }, 120);
+  saveTimer = setTimeout(writeNow, 120);
+}
+// 4.1 (§017): ausstehende Änderungen sofort sichern, wenn die App geschlossen, neu geladen oder ausgeblendet wird
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => { if (saveTimer) writeNow(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && saveTimer) writeNow(); });
+}
+
+// 4.1: offene Unterhaltung in die Ablage legen (Titel: selbst vergeben oder erste Frage). Kein stilles Löschen:
+// die Ablage fasst 200 Unterhaltungen; ältere werden nur entfernt, wenn mehr als 200 existieren (Hinweis in der Chat-Ansicht).
+export const CHAT_ARCHIVE_MAX = 200;
+function archiveCurrent(s) {
+  s.chatArchive ||= [];
+  if (!s.messages.length) return;
+  const first = s.messages.find((m) => m.role === 'user')?.text || 'Unterhaltung';
+  s.chatArchive.unshift({ id: uid(), ts: s.messages[s.messages.length - 1].ts || Date.now(), title: s.chatTitle || first.split('\n')[0].slice(0, 60), messages: s.messages });
+  s.chatArchive = s.chatArchive.slice(0, CHAT_ARCHIVE_MAX);
 }
 
 export const store = {
@@ -178,17 +201,22 @@ export const actions = {
   clearChat() {
     store.update((s) => (s.messages = []), { text: 'Chatverlauf gelöscht', icon: 'chat' });
   },
+  /** v1.1 „Antwort neu erzeugen“: letzte KI-Antwort und die zugehörige Frage entfernen, Frage zurückgeben (wird neu gesendet). */
+  takeLastExchange() {
+    let q = null;
+    store.update((s) => {
+      const last = s.messages[s.messages.length - 1];
+      if (!last || last.role !== 'assistant') return;
+      const prev = s.messages[s.messages.length - 2];
+      if (!prev || prev.role !== 'user') return;
+      q = prev.text;
+      s.messages = s.messages.slice(0, -2);
+    });
+    return q;
+  },
   /** Neuer Chat: aktuellen Verlauf ablegen (nicht löschen), dann leer beginnen. */
   newChat() {
-    store.update((s) => {
-      s.chatArchive ||= [];
-      if (s.messages.length) {
-        const first = s.messages.find((m) => m.role === 'user')?.text || 'Unterhaltung';
-        s.chatArchive.unshift({ id: uid(), ts: s.messages[s.messages.length - 1].ts || Date.now(), title: first.split('\n')[0].slice(0, 60), messages: s.messages });
-        s.chatArchive = s.chatArchive.slice(0, 30);
-      }
-      s.messages = [];
-    }, { text: 'Neuer Chat begonnen', icon: 'chat' });
+    store.update((s) => { archiveCurrent(s); s.messages = []; s.chatTitle = ''; }, { text: 'Neuer Chat begonnen', icon: 'chat' });
   },
   /** Abgelegten Chat wieder öffnen; der aktuelle wird dabei abgelegt. */
   openChat(id) {
@@ -197,11 +225,18 @@ export const actions = {
       const i = s.chatArchive.findIndex((c) => c.id === id);
       if (i < 0) return;
       const [c] = s.chatArchive.splice(i, 1);
-      if (s.messages.length) {
-        const first = s.messages.find((m) => m.role === 'user')?.text || 'Unterhaltung';
-        s.chatArchive.unshift({ id: uid(), ts: s.messages[s.messages.length - 1].ts || Date.now(), title: first.split('\n')[0].slice(0, 60), messages: s.messages });
-      }
+      archiveCurrent(s);
       s.messages = c.messages;
+      s.chatTitle = c.title || '';
+    });
+  },
+  /** 4.1: Unterhaltung umbenennen ('current' = die offene). */
+  renameChat(id, title) {
+    const t = String(title || '').trim().slice(0, 80);
+    if (!t) return;
+    store.update((s) => {
+      if (id === 'current') s.chatTitle = t;
+      else { const c = (s.chatArchive || []).find((x) => x.id === id); if (c) c.title = t; }
     });
   },
   deleteArchivedChat(id) {

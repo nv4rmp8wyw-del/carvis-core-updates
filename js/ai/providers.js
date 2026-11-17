@@ -113,30 +113,33 @@ async function getJSON(url, timeout = 8000, headers = {}) {
 }
 
 const trimSlash = (u) => String(u || '').replace(/\/+$/, '');
+// Längengrenze für lokale Modelle: sehr kleine Modelle hören sonst manchmal nicht auf (Wiederholungsschleifen).
+export const MAX_TOKENS = 2048;
+export const CHECK_TOKENS = 32; // kurze Verbindungsprüfungen („Antworte nur mit OK“)
 
 /**
  * Ruft ein Expertenmodell auf. Einheitliches Ergebnis: { content, ms, model }.
  * @param settings  { ollamaUrl, proxyUrl }
  */
-export async function callExpert(ex, messages, settings, { timeout, signal, onToken } = {}) {
+export async function callExpert(ex, messages, settings, { timeout, signal, onToken, maxTokens = MAX_TOKENS } = {}) {
   // Lokale Modelle: großzügiges Limit, da das erste Laden in den Speicher Minuten dauern kann.
   // Ein Abbruch während des Ladens zwingt Ollama sonst, von vorn zu beginnen.
   timeout ??= ex.local ? 300000 : 120000;
   const t0 = performance.now();
   activeExperts.add(ex.id);
-  try { return await callExpertInner(ex, messages, settings, { timeout, signal, t0, onToken }); } finally { activeExperts.delete(ex.id); }
+  try { return await callExpertInner(ex, messages, settings, { timeout, signal, t0, onToken, maxTokens }); } finally { activeExperts.delete(ex.id); }
 }
 
-async function callExpertInner(ex, messages, settings, { timeout, signal, t0, onToken }) {
+async function callExpertInner(ex, messages, settings, { timeout, signal, t0, onToken, maxTokens }) {
   let content;
   if (ex.provider === 'ollama' && onToken) {
-    content = await ollamaStream(ex, messages, settings, { timeout, signal, onToken });
+    content = await ollamaStream(ex, messages, settings, { timeout, signal, onToken, maxTokens });
   } else if (ex.provider === 'ollama') {
     const r = ollamaRoute(settings.ollamaUrl);
-    const d = await post(`${r.base}/api/chat`, { model: ex.model, messages, stream: false, keep_alive: '30m' }, timeout, signal, r.headers);
+    const d = await post(`${r.base}/api/chat`, { model: ex.model, messages, stream: false, keep_alive: '30m', options: { num_predict: maxTokens } }, timeout, signal, r.headers);
     content = d?.message?.content;
   } else if (ex.provider === 'openai') {
-    const d = await post(ex.endpoint, { model: ex.model, messages, stream: false }, timeout, signal);
+    const d = await post(ex.endpoint, { model: ex.model, messages, stream: false, max_tokens: maxTokens }, timeout, signal);
     content = d?.choices?.[0]?.message?.content ?? d?.message?.content;
   } else if (ex.provider === 'webllm') {
     const { chat } = await import('./webllm.js');
@@ -156,7 +159,7 @@ async function callExpertInner(ex, messages, settings, { timeout, signal, t0, on
 
 /** Ollama mit Streaming: liefert Teilantworten an onToken(textBisher). Zeitlimit gilt bis zum ersten Zeichen
  *  (Modell laden kann dauern) und danach als Ruhezeit zwischen zwei Stücken. Abbruch über signal. */
-async function ollamaStream(ex, messages, settings, { timeout, signal, onToken }) {
+async function ollamaStream(ex, messages, settings, { timeout, signal, onToken, maxTokens = MAX_TOKENS }) {
   const r = ollamaRoute(settings.ollamaUrl);
   const ctrl = new AbortController();
   const abort = () => ctrl.abort();
@@ -165,7 +168,7 @@ async function ollamaStream(ex, messages, settings, { timeout, signal, onToken }
   const idle = () => { clearTimeout(timer); timer = setTimeout(abort, Math.min(timeout, 120000)); };
   let text = '';
   try {
-    const res = await fetch(`${r.base}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...r.headers }, body: JSON.stringify({ model: ex.model, messages, stream: true, keep_alive: '30m' }), signal: ctrl.signal });
+    const res = await fetch(`${r.base}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...r.headers }, body: JSON.stringify({ model: ex.model, messages, stream: true, keep_alive: '30m', options: { num_predict: maxTokens } }), signal: ctrl.signal });
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
     const reader = res.body.getReader();
     const dec = new TextDecoder();

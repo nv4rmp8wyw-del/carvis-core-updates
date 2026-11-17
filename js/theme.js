@@ -3,6 +3,7 @@
 
 /** Akzentfarben (gedämpft). Die IDs bleiben stabil, weil sie gespeichert werden. */
 export const PRESETS = [
+  { id: 'carvis', label: 'CARVIS (v1.1)', color: '#8b6cff' },
   { id: 'tuerkis', label: 'Türkis (Standard)', color: '#8fcfc7' },
   { id: 'silber', label: 'Silber', color: '#c9c6bf' },
   { id: 'eis', label: 'Eisweiß', color: '#e4eeee' },
@@ -116,10 +117,25 @@ export function normalizeTheme(theme) {
   num('textScale', 0.85, 1.3); num('weight', 300, 600); num('radius', 0, 2); num('shadow', 0, 2); num('density', 0.75, 1.3);
   num('transparency', 0, 0.45); num('glass', 0, 24); num('speed', 0.25, 3); num('glow', 0, 1.8); num('panelMin', 200, 520);
   if (!['full', 'calm', 'minimal', 'off'].includes(t.coreView)) t.coreView = 'full';
-  if (!['glass', 'standard', 'compact'].includes(t.look)) t.look = 'glass';
+  if (!['glass', 'standard', 'compact', 'v41'].includes(t.look)) t.look = 'glass';
   if (!Array.isArray(t.hidden)) t.hidden = [];
   if (!Array.isArray(t.order)) t.order = [];
-  return t;
+  return v41(t);
+}
+
+/**
+ * CARVIS CORE 4.1: nur noch zwei Darstellungen (Hell/Dunkel) und ein festes, abgestimmtes Designsystem.
+ * Frühere Einstellungen werden übernommen, soweit sie noch Sinn ergeben: „System“/„Eigen“ werden zur passenden
+ * hellen bzw. dunklen Darstellung, Textgröße bleibt (Barrierefreiheit). Farbeditoren, Profile, Dichte, Glas-Regler
+ * usw. sind nicht mehr Teil der Oberfläche (D-044); gespeicherte Werte werden nicht gelöscht, nur nicht mehr angewendet.
+ */
+export const V41_LOCKED = { preset: 'carvis', accent: '#8b6cff', profile: 'carvis41', radius: 1, shadow: 1, density: 1, weight: 400, transparency: 0, glass: 0, glow: 0.5, panelMin: 260, look: 'v41', hidden: [], order: [] };
+function v41(t) {
+  let mode = t.mode;
+  if (mode === 'system') mode = matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  if (mode === 'custom') { const c = t.bg ? customSurfaces(t.bg, t.surface) : null; mode = c?.light ? 'light' : 'dark'; }
+  if (mode !== 'light') mode = 'dark';
+  return { ...t, ...V41_LOCKED, mode, bg: '', surface: '', coreView: t.coreView === 'off' ? 'off' : 'full' };
 }
 
 const TOKENS = ['--bg', '--bg-1', '--surface', '--surface-2', '--surface-3', '--surface-4'];
@@ -189,14 +205,29 @@ export function applySpeed(speed = 1) {
 }
 
 /** Aktuelle Kontrastwerte der wirklich angewendeten Farben (für die Lesbarkeitsprüfung). */
+/** Farbe (Hex oder rgb/rgba) als deckendes Hex – halbtransparente Flächen werden auf den Hintergrund gerechnet. */
+export function solidColor(c, bg = '#000000') {
+  c = String(c || '').trim();
+  if (/^#[\da-f]{6}$/i.test(c)) return c;
+  if (/^#[\da-f]{3}$/i.test(c)) return '#' + c.slice(1).split('').map((x) => x + x).join('');
+  const m = /^rgba?\(([^)]+)\)$/i.exec(c);
+  if (!m) return c;
+  const [r, g, b, a = 1] = m[1].split(/[ ,/]+/).filter(Boolean).map(Number);
+  const base = rgbOf(solidColor(bg)) || [0, 0, 0];
+  const mix = [r, g, b].map((v, i) => Math.round(v * a + base[i] * (1 - a)));
+  return '#' + mix.map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
 export function measureContrast() {
   const cs = getComputedStyle(document.documentElement);
   const v = (k) => cs.getPropertyValue(k).trim();
   const acc = '#' + v('--accent-rgb').split(',').map((x) => (+x).toString(16).padStart(2, '0')).join('');
+  const bg = solidColor(v('--bg'));
+  const card = solidColor(v('--surface'), bg); // 4.1: Karten sind leicht durchscheinend – auf den Hintergrund gerechnet
   return [
-    ['Text auf Hintergrund', contrast(v('--text'), v('--bg'))],
-    ['Text auf Karten', contrast(v('--text'), v('--surface'))],
-    ['Zweittext auf Karten', contrast(v('--text-2'), v('--surface'))],
-    ['Akzent auf Hintergrund', contrast(acc, v('--bg'))],
+    ['Text auf Hintergrund', contrast(solidColor(v('--text'), bg), bg)],
+    ['Text auf Karten', contrast(solidColor(v('--text'), card), card)],
+    ['Zweittext auf Karten', contrast(solidColor(v('--text-2'), card), card)],
+    ['Akzent auf Hintergrund', contrast(acc, bg)],
   ];
 }

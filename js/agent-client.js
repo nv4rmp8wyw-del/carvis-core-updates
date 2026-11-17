@@ -109,6 +109,7 @@ export const agentClient = {
   webFetch: (url) => call('POST', '/web/fetch', { url }, { ms: 40000 }),
   speechStatus: () => call('GET', '/speech/status', undefined, { ms: 45000 }),
   speechRecognize: (wav, lang) => call('POST', '/speech/recognize', { wav, lang }, { ms: 130000 }),
+  speechTts: (text, voice = '') => call('POST', '/speech/tts', { text, voice }, { ms: 70000 }),
   net: (targets) => call('POST', '/net', { targets }, { ms: 30000 }),
   list: (path = '') => call('GET', `/fs/list?path=${encodeURIComponent(path)}`),
   read: (path) => call('GET', `/fs/read?path=${encodeURIComponent(path)}`),
@@ -116,6 +117,16 @@ export const agentClient = {
   confirm: (id) => call('POST', '/action/confirm', { id }),
   cancel: (id) => call('POST', '/action/cancel', { id }),
   log: () => call('GET', '/log'),
+  // Selbstreparatur: kurze Erreichbarkeitsprüfung (ohne Token) und kontrollierter Neustart des integrierten Agenten (nur Windows-App)
+  ping: () => call('GET', '/hello', undefined, { auth: false, ms: 5000 }),
+  async restartApp() {
+    if (!inApp()) throw new Error('Neustart nur in der Windows-App möglich (der Agent wurde von Hand gestartet).');
+    agentState.connected = false;
+    await window.__TAURI__.core.invoke('agent_restart');
+    const r = await autoConnectApp(20000);
+    if (!r.ok) throw new Error(r.error || 'Agent nach Neustart nicht erreichbar');
+    return r;
+  },
   async stop() {
     const r = await call('POST', '/stop', {});
     agentState.stopped = true;
