@@ -553,7 +553,9 @@ jobs:
           frei=nein
           [ "$f" = "$v" ] && frei=ja || echo "::warning::$v ist nicht freigegeben (.github/release-freigabe.txt: '${f:-leer}') – nichts veröffentlicht."
           # Produktversion für den Release-Titel (D-046): Build 4.x.y = CARVIS CORE v1.x.y
-          IFS=. read -r m mi pa <<< "$v"; if [ "$m" -ge 4 ]; then label="CARVIS CORE v$((m-3)).${mi}$([ "$pa" != 0 ] && echo ".$pa")"; else label="CARVIS CORE $v"; fi
+          # Ohne „$( … && echo )“: bei x.y.0 liefert so eine Ersetzung Code 1 und bash -e bricht still ab (Lauf 43990489164).
+          IFS=. read -r m mi pa <<< "$v"; pt=""; if [ "${pa:-0}" != 0 ]; then pt=".$pa"; fi
+          if [ "$m" -ge 4 ]; then label="CARVIS CORE v$((m-3)).${mi}${pt}"; else label="CARVIS CORE $v"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"; echo "frei=$frei" >> "$GITHUB_OUTPUT"; echo "label=$label" >> "$GITHUB_OUTPUT"
       - name: Web-App zusammenstellen
         if: steps.v.outputs.frei == 'ja'
@@ -593,7 +595,7 @@ jobs:
 
           - **Installer:** \`CARVIS-CORE_${V}_x64-setup.exe\` – installieren und starten.
           - **Portable:** \`CARVIS-CORE.exe\` – ohne Installation starten.
-          - Nicht code-signiert: Windows SmartScreen zeigt „Unbekannter Herausgeber“ → „Weitere Informationen“ → „Trotzdem ausführen“.
+          - Nicht code-signiert: Windows SmartScreen kann beim ersten Start „Unbekannter Herausgeber“ anzeigen. Prüfsumme vorher mit \`SHA256SUMS.txt\` vergleichen.
           - Prüfsummen: \`SHA256SUMS.txt\`
 
           Vor der Veröffentlichung auf einem GitHub-Windows-Runner geprüft: Installation, Start mit Agent, Umstieg von 3.6.7 und zurück, Update-Kette, portabler Start; dazu Browser-Tests und ein echter KI-Test. Nicht auf einem Nutzer-PC getestet.
